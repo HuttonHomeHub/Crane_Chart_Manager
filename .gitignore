@@ -1,1 +1,11 @@
 __pycache__/
+.venv/
+.pytest_cache/
+
+# Runtime state — user's catalogue lives here; the app re-creates an empty
+# uploads/ directory on startup if missing. Commit individual files if you
+# want them tracked.
+uploads/
+metadata.json
+metadata.json.lock
+metadata.json.tmp
