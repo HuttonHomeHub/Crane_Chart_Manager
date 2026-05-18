@@ -1,19 +1,1537 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
 <head>
-    <title>{{ title }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Crane Charts — professional crane specification document management.">
+    <title>Crane Charts</title>
+
+    <!-- Prevent flash of wrong theme: apply persisted theme before stylesheet evaluates -->
+    <script nonce="{{ csp_nonce }}">
+        (function () {
+            try {
+                var t = localStorage.getItem('crane.theme');
+                if (t === 'light' || t === 'dark') {
+                    document.documentElement.setAttribute('data-theme', t);
+                }
+            } catch (_) { /* localStorage may be unavailable */ }
+        })();
+    </script>
+
+    <!-- H (round 8): tiny inline SVG favicon — the construction-crane silhouette in amber.
+         Inline data URL avoids the dev-server 404 on /favicon.ico every page load. -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F59E0B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='14' width='20' height='8' rx='2'/%3E%3Cpath d='M4 10V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4'/%3E%3Cpath d='M12 4v10'/%3E%3C/svg%3E">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
-
+    <!-- Kick off PDF.js fetches in parallel with parsing/styling. The main lib goes
+         into the page's module graph (modulepreload). The worker is loaded by PDF.js
+         via `new Worker(url, { type: 'module' })`, which has its own module graph —
+         the semantically correct hint is `preload as="fetch"` to warm the HTTP cache. -->
+    <link rel="modulepreload" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.mjs" crossorigin>
+    <link rel="preload" as="fetch" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.worker.min.mjs" crossorigin>
+</head>
 <body>
-    <div class="App">
-        <header class="App-header">
-            <img src="{{ url_for('static', filename='Octocat.png') }}" class="App-logo" alt="logo" />
-            <p>
-                GitHub Codespaces <span class="heart">♥️</span> Flask
-            </p>
-            <p class="small">
-                Edit <code>templates/index.html</code> and refresh to see your changes!
-            </p>
-        </header>
-    </div>
-</body>
+    <!-- G (round 8): minimal no-JS message. Without JS the sidebar and viewer are useless. -->
+    <noscript>
+        <div class="noscript">
+            <div class="noscript__panel">
+                <h1>Crane Charts requires JavaScript</h1>
+                <p>This application uses client-side rendering for the PDF viewer and document list. Please enable JavaScript and reload the page.</p>
+            </div>
+        </div>
+    </noscript>
 
+    <!-- SVG sprite (Lucide) -->
+    <svg width="0" height="0" class="icon-sprite" aria-hidden="true" focusable="false">
+        <defs>
+            <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+            <symbol id="icon-upload-cloud" viewBox="0 0 24 24"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></symbol>
+            <symbol id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+            <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+            <symbol id="icon-help-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+            <symbol id="icon-menu" viewBox="0 0 24 24"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></symbol>
+            <symbol id="icon-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+            <symbol id="icon-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+            <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+            <symbol id="icon-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></symbol>
+            <symbol id="icon-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/></symbol>
+            <symbol id="icon-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+            <symbol id="icon-minimize" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></symbol>
+            <symbol id="icon-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+            <symbol id="icon-edit-3" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+            <symbol id="icon-trash-2" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+            <symbol id="icon-file-text" viewBox="0 0 24 24"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></symbol>
+            <symbol id="icon-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+            <symbol id="icon-construction" viewBox="0 0 24 24"><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 18h.01"/><path d="M10 18h.01"/><path d="M14 18h.01"/><path d="M18 18h.01"/><path d="M4 10V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4"/><path d="M12 4v10"/></symbol>
+            <symbol id="icon-move-horizontal" viewBox="0 0 24 24"><polyline points="18 8 22 12 18 16"/><polyline points="6 8 2 12 6 16"/><line x1="2" x2="22" y1="12" y2="12"/></symbol>
+            <symbol id="icon-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/></symbol>
+            <symbol id="icon-check-circle-2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+            <symbol id="icon-alert-triangle" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></symbol>
+            <symbol id="icon-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+            <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></symbol>
+        </defs>
+    </svg>
+
+    <!-- App bar -->
+    <header class="app-bar">
+        <button class="app-bar__menu-toggle" id="sidebar-toggle" aria-label="Toggle navigation" aria-expanded="false">
+            <svg class="icon"><use href="#icon-menu"/></svg>
+        </button>
+        <a class="app-bar__brand" href="/">
+            <svg class="icon icon--accent"><use href="#icon-construction"/></svg>
+            <span>Crane Charts</span>
+        </a>
+        <div class="app-bar__search" role="search">
+            <svg class="icon icon--muted"><use href="#icon-search"/></svg>
+            <input id="search-input" type="search" placeholder="Search make, type, model, capacity…" aria-label="Search">
+            <kbd class="kbd" data-mod-key="K">{{ '⌘K' if is_mac else 'Ctrl+K' }}</kbd>
+        </div>
+        <div class="app-bar__spacer"></div>
+        <div class="app-bar__actions">
+            <button class="btn btn--ghost btn--icon app-bar__search-toggle" id="search-toggle" aria-label="Open search" title="Search">
+                <svg class="icon"><use href="#icon-search"/></svg>
+            </button>
+            <button class="btn btn--ghost btn--icon" id="theme-toggle" aria-label="Toggle theme" title="Toggle theme">
+                <svg class="icon" id="theme-icon"><use href="#icon-moon"/></svg>
+            </button>
+            <button class="btn btn--ghost btn--icon" id="help-toggle" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">
+                <svg class="icon"><use href="#icon-help-circle"/></svg>
+            </button>
+            <button class="btn btn--primary" id="upload-trigger">
+                <svg class="icon"><use href="#icon-upload-cloud"/></svg>
+                <span>Upload</span>
+                <kbd class="kbd kbd--on-accent" data-mod-key="U">{{ '⌘U' if is_mac else 'Ctrl+U' }}</kbd>
+            </button>
+        </div>
+    </header>
+
+    <div class="layout">
+        <nav class="sidebar" id="sidebar" aria-label="Documents">
+            <section class="sidebar__panel sidebar__panel--makes">
+                <div class="sidebar__panel-header">
+                    <span>Manufacturers</span>
+                    <span class="sidebar__panel-count" id="makes-count">0</span>
+                </div>
+                <div class="sidebar__list" id="make-list" aria-label="Manufacturers"></div>
+            </section>
+            <section class="sidebar__panel sidebar__panel--models">
+                <div class="sidebar__panel-header">
+                    <span>Models</span>
+                    <span class="sidebar__panel-count" id="models-count">0</span>
+                </div>
+                <div class="sidebar__list" id="model-list" aria-label="Models"></div>
+            </section>
+        </nav>
+
+        <div class="sidebar-scrim" id="sidebar-scrim" aria-hidden="true"></div>
+
+        <main class="viewer">
+            <div class="viewer__empty" id="viewer-empty">
+                <svg class="icon icon--xl icon--muted"><use href="#icon-file-text"/></svg>
+                <h2 id="viewer-empty-title">No document selected</h2>
+                <p id="viewer-empty-body">Choose a manufacturer and model from the sidebar, or drag a PDF anywhere on this window to upload a new specification.</p>
+                <button class="btn btn--primary" id="empty-upload-btn">
+                    <svg class="icon"><use href="#icon-upload-cloud"/></svg>
+                    <span id="empty-upload-label">Upload a specification</span>
+                </button>
+            </div>
+
+            <div class="info-bar" id="info-bar" hidden>
+                <div class="info-bar__group">
+                    <span class="info-bar__label">Manufacturer</span>
+                    <span class="info-bar__value" id="info-make">—</span>
+                </div>
+                <div class="info-bar__group">
+                    <span class="info-bar__label">Type</span>
+                    <span class="info-bar__value" id="info-type">—</span>
+                </div>
+                <div class="info-bar__group">
+                    <span class="info-bar__label">Model</span>
+                    <span class="info-bar__value" id="info-model">—</span>
+                </div>
+                <div class="info-bar__group">
+                    <span class="info-bar__label">Capacity</span>
+                    <span class="info-bar__value info-bar__value--accent" id="info-capacity">—</span>
+                </div>
+            </div>
+
+            <div class="viewer__well" id="pdf-viewer" hidden>
+                <div class="viewer__skeleton" id="viewer-skeleton" hidden></div>
+                <canvas id="pdf-canvas"></canvas>
+            </div>
+
+            <div class="toolbar-pill" id="toolbar" hidden role="toolbar" aria-label="PDF controls">
+                <button class="toolbar-pill__btn" id="prev-page" aria-label="Previous page" title="Previous page (←)">
+                    <svg class="icon"><use href="#icon-chevron-left"/></svg>
+                </button>
+                <div class="toolbar-pill__page">
+                    <input id="page-input" type="number" min="1" value="1" aria-label="Page number">
+                    <span class="toolbar-pill__separator">/</span>
+                    <span id="page-total">1</span>
+                </div>
+                <button class="toolbar-pill__btn" id="next-page" aria-label="Next page" title="Next page (→)">
+                    <svg class="icon"><use href="#icon-chevron-right"/></svg>
+                </button>
+                <span class="toolbar-pill__divider"></span>
+                <button class="toolbar-pill__btn" id="zoom-out" aria-label="Zoom out" title="Zoom out (−)">
+                    <svg class="icon"><use href="#icon-zoom-out"/></svg>
+                </button>
+                <button class="toolbar-pill__zoom-readout" id="zoom-level" aria-label="Zoom level — click to cycle fit modes" title="Cycle fit-page / fit-width / 100%">100%</button>
+                <button class="toolbar-pill__btn" id="zoom-in" aria-label="Zoom in" title="Zoom in (+)">
+                    <svg class="icon"><use href="#icon-zoom-in"/></svg>
+                </button>
+                <span class="toolbar-pill__divider"></span>
+                <button class="toolbar-pill__btn" id="fit-width" aria-label="Fit width" title="Fit width">
+                    <svg class="icon"><use href="#icon-move-horizontal"/></svg>
+                </button>
+                <button class="toolbar-pill__btn" id="fit-page" aria-label="Fit page" title="Fit page">
+                    <svg class="icon"><use href="#icon-square"/></svg>
+                </button>
+                <span class="toolbar-pill__divider"></span>
+                <button class="toolbar-pill__btn" id="download-btn" aria-label="Download PDF" title="Download">
+                    <svg class="icon"><use href="#icon-download"/></svg>
+                </button>
+                <button class="toolbar-pill__btn" id="fullscreen-btn" aria-label="Fullscreen" title="Fullscreen (F)">
+                    <svg class="icon" id="fullscreen-icon"><use href="#icon-maximize"/></svg>
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast stack: aria-live lives on each toast (polite/assertive per variant); none here to avoid double-announce. -->
+    <div class="toast-stack" id="toast-stack" role="region" aria-label="Notifications"></div>
+
+    <!-- Drag-and-drop overlay -->
+    <div class="dropzone" id="dropzone" hidden aria-hidden="true">
+        <div class="dropzone__card">
+            <svg class="icon icon--xl icon--accent"><use href="#icon-upload-cloud"/></svg>
+            <h2>Drop PDF to upload</h2>
+            <p>We'll ask for the manufacturer, type, model, and capacity next.</p>
+        </div>
+    </div>
+
+    <!-- Upload / Edit metadata modal: native <dialog> gives focus trap, Esc handling, top-layer rendering for free. -->
+    <dialog class="modal" id="metadata-modal" aria-labelledby="modal-title">
+        <div class="modal__panel">
+            <header class="modal__header">
+                <h2 id="modal-title">Upload crane specification</h2>
+                <button class="modal__close" data-modal-close="metadata-modal" aria-label="Close dialog">
+                    <svg class="icon"><use href="#icon-x"/></svg>
+                </button>
+            </header>
+            <form id="metadata-form" novalidate>
+                <input type="hidden" id="form-mode" value="upload">
+                <input type="hidden" id="form-original-filename" value="">
+                <div class="modal__body">
+                    <div class="form-field" id="file-field">
+                        <button type="button" class="file-picker" id="file-picker" aria-describedby="file-picker-hint">
+                            <svg class="icon icon--lg"><use href="#icon-upload-cloud"/></svg>
+                            <span class="file-picker__primary" id="file-picker-text">Click to choose a PDF</span>
+                            <span class="file-picker__secondary" id="file-picker-hint">PDF only · 500 MB max · or drop one anywhere on the page</span>
+                        </button>
+                        <input id="file-input" type="file" accept="application/pdf,.pdf" hidden>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label for="make-input">Manufacturer</label>
+                            <input id="make-input" type="text" required placeholder="Liebherr, Tadano, Manitowoc…">
+                        </div>
+                        <div class="form-field">
+                            <label for="type-input">Type</label>
+                            <input id="type-input" type="text" required placeholder="Mobile, Crawler, Tower…">
+                        </div>
+                        <div class="form-field">
+                            <label for="model-input">Model</label>
+                            <input id="model-input" type="text" required placeholder="LTM 1200-3.1">
+                        </div>
+                        <div class="form-field">
+                            <label for="capacity-input">Rated capacity</label>
+                            <input id="capacity-input" type="text" required placeholder="200 t">
+                        </div>
+                    </div>
+                </div>
+                <footer class="modal__footer">
+                    <button type="button" class="btn btn--ghost" data-modal-close="metadata-modal">Cancel</button>
+                    <button type="submit" class="btn btn--primary" id="form-submit-btn">Upload</button>
+                </footer>
+            </form>
+        </div>
+    </dialog>
+
+    <!-- Shortcuts overlay -->
+    <dialog class="modal" id="shortcuts-modal" aria-labelledby="shortcuts-title">
+        <div class="modal__panel modal__panel--md">
+            <header class="modal__header">
+                <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+                <button class="modal__close" data-modal-close="shortcuts-modal" aria-label="Close">
+                    <svg class="icon"><use href="#icon-x"/></svg>
+                </button>
+            </header>
+            <div class="shortcuts">
+                <div class="shortcut-row"><span>Focus search</span><span class="shortcut-row__keys"><kbd class="kbd" data-mod>{{ '⌘' if is_mac else 'Ctrl' }}</kbd><kbd class="kbd">K</kbd></span></div>
+                <div class="shortcut-row"><span>Upload</span><span class="shortcut-row__keys"><kbd class="kbd" data-mod>{{ '⌘' if is_mac else 'Ctrl' }}</kbd><kbd class="kbd">U</kbd></span></div>
+                <div class="shortcut-row"><span>Previous page</span><span class="shortcut-row__keys"><kbd class="kbd">←</kbd></span></div>
+                <div class="shortcut-row"><span>Next page</span><span class="shortcut-row__keys"><kbd class="kbd">→</kbd></span></div>
+                <div class="shortcut-row"><span>Zoom in</span><span class="shortcut-row__keys"><kbd class="kbd">+</kbd></span></div>
+                <div class="shortcut-row"><span>Zoom out</span><span class="shortcut-row__keys"><kbd class="kbd">−</kbd></span></div>
+                <div class="shortcut-row"><span>Fullscreen</span><span class="shortcut-row__keys"><kbd class="kbd">F</kbd></span></div>
+                <div class="shortcut-row"><span>Close / exit</span><span class="shortcut-row__keys"><kbd class="kbd">Esc</kbd></span></div>
+                <div class="shortcut-row"><span>This menu</span><span class="shortcut-row__keys"><kbd class="kbd">?</kbd></span></div>
+            </div>
+        </div>
+    </dialog>
+
+    <script type="module" nonce="{{ csp_nonce }}">
+    'use strict';
+
+    const PDFJS_VERSION = '4.6.82';
+    const PDFJS_BASE = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}`;
+
+    let pdfjsLib;
+    try {
+        pdfjsLib = await import(`${PDFJS_BASE}/pdf.min.mjs`);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_BASE}/pdf.worker.min.mjs`;
+        // B: PDF.js 4.x ships the worker as an ES module; without this it can silently
+        // fall back to the "fake worker" (synchronous parsing on the main thread),
+        // which lags badly on multi-MB PDFs.
+        pdfjsLib.GlobalWorkerOptions.workerType = 'module';
+    } catch (err) {
+        console.error('Failed to load PDF.js:', err);
+        document.addEventListener('DOMContentLoaded', () => {
+            const empty = document.getElementById('viewer-empty');
+            if (empty) {
+                empty.innerHTML = `
+                    <svg class="icon icon--xl icon--muted"><use href="#icon-alert-triangle"/></svg>
+                    <h2>PDF viewer failed to load</h2>
+                    <p>The PDF rendering library couldn't be fetched from the CDN.
+                       Check your connection or any content-blocking extensions and reload.</p>
+                `;
+            }
+        });
+        throw err;
+    }
+
+    const $  = (sel, root = document) => root.querySelector(sel);
+    const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+    // J: read the CSRF token the server set as a cookie, echo it back in a header on mutating requests.
+    function csrfToken() {
+        const match = document.cookie.match(/(?:^|; )crane_csrf=([^;]+)/);
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+    const isMac = (() => {
+        const uaData = navigator.userAgentData;
+        if (uaData && typeof uaData.platform === 'string') {
+            return /mac/i.test(uaData.platform);
+        }
+        return /Mac|iPhone|iPad/.test(navigator.platform || '');
+    })();
+
+    // A + E: kbd hint chips render Ctrl on non-Mac, ⌘ on Mac. Server-side rendering
+    // gets it right on first paint via the is_mac context variable; this JS pass
+    // corrects in case the User-Agent string lied (spoofed UAs, atypical browsers).
+    function localizeKbds() {
+        const mod = isMac ? '⌘' : 'Ctrl';
+        $$('.kbd[data-mod-key]').forEach(el => {
+            el.textContent = isMac ? (mod + el.dataset.modKey) : (mod + '+' + el.dataset.modKey);
+        });
+        $$('.kbd[data-mod]').forEach(el => {
+            el.textContent = mod;
+        });
+    }
+
+    /* =========================================================
+       REGION: STATE
+       ========================================================= */
+    const state = {
+        pdfDoc: null,
+        pageNum: 1,
+        pageCount: 0,
+        zoom: 1,                    // effective scale multiplier
+        fitMode: 'page',            // 'page' | 'width' | 'custom'
+        files: [],
+        current: null,              // currently-open file record
+        selectedMake: null,
+        pendingFile: null,          // file pending in upload modal
+        renderToken: 0,
+        openToken: 0,               // monotonic — aborts stale openFile() calls
+        submitToken: 0,             // monotonic — guards submit-button label restoration
+        theme: 'dark',
+    };
+
+    function updateInfoBar(fields) {
+        $('#info-make').textContent     = (fields && fields.make)     || '—';
+        $('#info-type').textContent     = (fields && fields.type)     || '—';
+        $('#info-model').textContent    = (fields && fields.model)    || '—';
+        $('#info-capacity').textContent = (fields && fields.capacity) || '—';
+    }
+
+    // E (round 8): keep document.title in sync with the currently-open document so
+    // the browser tab / history entries / window switcher show meaningful labels.
+    const BASE_TITLE = 'Crane Charts';
+    function updateTitle(fields) {
+        if (!fields) { document.title = BASE_TITLE; return; }
+        const parts = [fields.make, fields.model].filter(Boolean).join(' ');
+        document.title = parts ? `${parts} · ${BASE_TITLE}` : BASE_TITLE;
+    }
+
+    const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+
+    /* =========================================================
+       REGION: API
+       ========================================================= */
+    const api = {
+        async listPdfs() {
+            const r = await fetch('/api/pdfs');
+            if (!r.ok) throw new Error((await safeErr(r)) || 'Failed to load documents');
+            return r.json();
+        },
+        upload(file, fields, onProgress) {
+            // XHR (not fetch) so we can show real upload progress.
+            return new Promise((resolve, reject) => {
+                const fd = new FormData();
+                fd.append('file', file);
+                fd.append('make', fields.make);
+                fd.append('type', fields.type);
+                fd.append('model', fields.model);
+                fd.append('capacity', fields.capacity);
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/api/upload');
+                xhr.setRequestHeader('X-CSRF-Token', csrfToken());
+                xhr.responseType = 'json';
+                if (onProgress) {
+                    xhr.upload.addEventListener('progress', (ev) => {
+                        if (ev.lengthComputable) onProgress(ev.loaded, ev.total);
+                    });
+                }
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve(xhr.response);
+                    } else {
+                        const msg = xhr.response && xhr.response.error;
+                        reject(new Error(msg || ('Upload failed (' + xhr.status + ')')));
+                    }
+                };
+                xhr.onerror = () => reject(new Error('Network error during upload'));
+                xhr.onabort = () => reject(new Error('Upload aborted'));
+                xhr.send(fd);
+            });
+        },
+        async updateMetadata(filename, fields) {
+            const r = await fetch('/api/metadata/' + encodeURIComponent(filename), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+                body: JSON.stringify(fields),
+            });
+            if (!r.ok) throw new Error((await safeErr(r)) || 'Update failed');
+            return r.json();
+        },
+        async remove(filename) {
+            const r = await fetch('/api/delete/' + encodeURIComponent(filename), {
+                method: 'DELETE',
+                headers: { 'X-CSRF-Token': csrfToken() },
+            });
+            if (!r.ok) throw new Error((await safeErr(r)) || 'Delete failed');
+            return r.json();
+        },
+    };
+
+    async function safeErr(r) {
+        try { return (await r.json()).error; } catch (_) { return null; }
+    }
+
+    /* =========================================================
+       REGION: TOAST
+       ========================================================= */
+    const toast = (() => {
+        const stack = $('#toast-stack');
+        const MAX = 4;
+        const ICONS = {
+            success: 'icon-check-circle-2',
+            danger:  'icon-alert-circle',
+            warning: 'icon-alert-triangle',
+            info:    'icon-info',
+        };
+        const TITLES = {
+            success: 'Success',
+            danger:  'Error',
+            warning: 'Heads up',
+            info:    'Info',
+        };
+
+        function show({ variant = 'info', title, message, durationMs }) {
+            while (stack.children.length >= MAX) stack.removeChild(stack.firstChild);
+            const el = document.createElement('div');
+            el.className = 'toast toast--' + variant;
+            el.setAttribute('role', variant === 'danger' ? 'alert' : 'status');
+            el.setAttribute('aria-live', variant === 'danger' ? 'assertive' : 'polite');
+            el.innerHTML = `
+                <svg class="icon"><use href="#${ICONS[variant]}"/></svg>
+                <div class="toast__body">
+                    <div class="toast__title"></div>
+                    ${message ? '<div class="toast__message"></div>' : ''}
+                </div>
+                <button class="toast__close" aria-label="Dismiss">
+                    <svg class="icon"><use href="#icon-x"/></svg>
+                </button>
+            `;
+            el.querySelector('.toast__title').textContent = title || TITLES[variant];
+            if (message) el.querySelector('.toast__message').textContent = message;
+            stack.appendChild(el);
+
+            const dur = durationMs != null
+                ? durationMs
+                : (variant === 'danger' ? null : 4500);
+            let timer = null;
+            const dismiss = () => {
+                if (el.classList.contains('is-leaving')) return;
+                el.classList.add('is-leaving');
+                el.addEventListener('animationend', () => el.remove(), { once: true });
+            };
+            const arm = () => { if (dur != null) timer = setTimeout(dismiss, dur); };
+            arm();
+
+            el.addEventListener('mouseenter', () => { if (timer) { clearTimeout(timer); timer = null; } });
+            el.addEventListener('mouseleave', arm);
+            el.addEventListener('click', dismiss);
+            return el;
+        }
+
+        return {
+            show,
+            success: (title, message) => show({ variant: 'success', title, message }),
+            danger:  (title, message) => show({ variant: 'danger', title, message }),
+            warning: (title, message) => show({ variant: 'warning', title, message }),
+            info:    (title, message) => show({ variant: 'info', title, message }),
+        };
+    })();
+
+    /* =========================================================
+       REGION: THEME
+       ========================================================= */
+    const theme = {
+        apply(name) {
+            state.theme = name;
+            document.documentElement.setAttribute('data-theme', name);
+            try { localStorage.setItem('crane.theme', name); } catch (_) {}
+            const icon = $('#theme-icon use');
+            if (icon) icon.setAttribute('href', name === 'dark' ? '#icon-sun' : '#icon-moon');
+        },
+        init() {
+            let saved = null;
+            try { saved = localStorage.getItem('crane.theme'); } catch (_) {}
+            this.apply(saved === 'light' ? 'light' : 'dark');
+            $('#theme-toggle').addEventListener('click', () => {
+                this.apply(state.theme === 'dark' ? 'light' : 'dark');
+            });
+        },
+    };
+
+    /* =========================================================
+       REGION: MODAL
+       ========================================================= */
+    /* H: native <dialog> — gives focus trap, Esc handling, top-layer rendering (above
+       fullscreen elements), and ::backdrop styling for free. Manual stack/trap/backdrop
+       code removed; we still bookkeep an `openSet` so isOpen()/closeTop() are O(1). */
+    const modal = (() => {
+        const openSet = new Set();
+
+        function focusable(root) {
+            return $$('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])', root)
+                .filter(el => !el.hasAttribute('disabled') && el.offsetParent !== null);
+        }
+
+        function open(id, options) {
+            const el = document.getElementById(id);
+            if (!el || el.open) return;
+            // <dialog>.showModal traps focus, makes the rest of the page inert, and
+            // pushes the dialog into the top layer. Pre-2022 browsers may throw — surface
+            // that to the user so a silently-broken Upload button isn't mystifying.
+            try {
+                el.showModal();
+            } catch (err) {
+                console.error('Dialog open failed:', err);
+                toast.danger('Could not open dialog', 'Your browser may be outdated — please update or try Chrome/Firefox/Safari.');
+                return;
+            }
+            openSet.add(id);
+
+            // Pick initial focus: explicit selector wins, otherwise the first non-close
+            // focusable element (so the close X isn't the default focus).
+            const f = focusable(el);
+            let target = options && options.focus ? el.querySelector(options.focus) : null;
+            if (!target) target = f.find(node => !node.classList.contains('modal__close')) || f[0];
+            if (target) target.focus();
+
+            // Native Esc fires a 'cancel' event; we want close-with-stack-tracking.
+            el.addEventListener('cancel', onCancel);
+            el.addEventListener('close', onClose);
+            el.addEventListener('mousedown', onBackdropDown);
+            el.addEventListener('mouseup', onBackdropUp);
+        }
+
+        function close(id) {
+            const el = document.getElementById(id);
+            if (!el || !el.open) return;
+            el.close();  // fires the 'close' event → onClose detaches listeners
+        }
+
+        function closeTop() {
+            // <dialog>.showModal stacks the top layer in the order they were opened.
+            // We can close whichever is most recent by iterating openSet (insertion-ordered).
+            const ids = Array.from(openSet);
+            if (ids.length) close(ids[ids.length - 1]);
+        }
+
+        function onCancel(e) {
+            // Allow Esc to close, but route through our close() for consistency.
+            e.preventDefault();
+            close(e.currentTarget.id);
+        }
+
+        function onClose(e) {
+            const el = e.currentTarget;
+            openSet.delete(el.id);
+            el.removeEventListener('cancel', onCancel);
+            el.removeEventListener('close', onClose);
+            el.removeEventListener('mousedown', onBackdropDown);
+            el.removeEventListener('mouseup', onBackdropUp);
+        }
+
+        // ξ: backdrop close still requires mousedown + mouseup both on the dialog
+        // element itself (which is where the ::backdrop renders). Stops accidental
+        // close when a drag starts inside the panel and ends on the backdrop.
+        let backdropDownTarget = null;
+        function onBackdropDown(e) {
+            backdropDownTarget = e.target === e.currentTarget ? e.currentTarget : null;
+        }
+        function onBackdropUp(e) {
+            if (backdropDownTarget && backdropDownTarget === e.currentTarget && e.target === e.currentTarget) {
+                close(e.currentTarget.id);
+            }
+            backdropDownTarget = null;
+        }
+
+        return { open, close, closeTop, isOpen: () => openSet.size > 0 };
+    })();
+
+    /* =========================================================
+       REGION: METADATA MODAL (upload / edit dual-mode)
+       ========================================================= */
+    const metadataModal = (() => {
+        const elTitle     = $('#modal-title');
+        const elMode      = $('#form-mode');
+        const elOrigName  = $('#form-original-filename');
+        const elFileField = $('#file-field');
+        const elFileInput = $('#file-input');
+        const elPickerTxt = $('#file-picker-text');
+        const elSubmit    = $('#form-submit-btn');
+        const elMake      = $('#make-input');
+        const elType      = $('#type-input');
+        const elModel     = $('#model-input');
+        const elCapacity  = $('#capacity-input');
+
+        function reset() {
+            state.pendingFile = null;
+            elFileInput.value = '';
+            elPickerTxt.textContent = 'Click to choose a PDF';
+            elMake.value = '';
+            elType.value = '';
+            elModel.value = '';
+            elCapacity.value = '';
+        }
+
+        function openUpload(file) {
+            reset();
+            state.submitToken++;
+            elSubmit.classList.remove('btn--loading');
+            elSubmit.disabled = false;
+            elMode.value = 'upload';
+            elOrigName.value = '';
+            elTitle.textContent = 'Upload crane specification';
+            elSubmit.textContent = 'Upload';
+            elFileField.hidden = false;
+            if (file) setPendingFile(file);
+            // If a file is already chosen (drag-drop path), start on Manufacturer;
+            // otherwise start on the file picker so keyboard users land there first.
+            modal.open('metadata-modal', { focus: file ? '#make-input' : '#file-picker' });
+        }
+
+        function openEdit(record) {
+            reset();
+            state.submitToken++;
+            elSubmit.classList.remove('btn--loading');
+            elSubmit.disabled = false;
+            elMode.value = 'edit';
+            elOrigName.value = record.name;
+            elTitle.textContent = 'Edit specification';
+            elSubmit.textContent = 'Save changes';
+            elFileField.hidden = true;
+            elMake.value     = record.make     || '';
+            elType.value     = record.type     || '';
+            elModel.value    = record.model    || '';
+            elCapacity.value = record.capacity || '';
+            modal.open('metadata-modal', { focus: '#make-input' });
+        }
+
+        function setPendingFile(file) {
+            state.pendingFile = file;
+            elPickerTxt.textContent = file.name;
+        }
+
+        elFileInput.addEventListener('change', (e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) setPendingFile(f);
+        });
+
+        $('#file-picker').addEventListener('click', () => elFileInput.click());
+
+        $('#metadata-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fields = {
+                make: elMake.value.trim(),
+                type: elType.value.trim(),
+                model: elModel.value.trim(),
+                capacity: elCapacity.value.trim(),
+            };
+            if (!fields.make || !fields.type || !fields.model || !fields.capacity) {
+                toast.warning('Missing details', 'All four fields are required.');
+                // D (round 8): focus the first empty field so the user can fix it immediately.
+                const first = [
+                    [fields.make, elMake],
+                    [fields.type, elType],
+                    [fields.model, elModel],
+                    [fields.capacity, elCapacity],
+                ].find(([v]) => !v);
+                if (first) first[1].focus();
+                return;
+            }
+            elSubmit.disabled = true;
+            // Capture mode at submit time so the finally clause can't clobber a freshly
+            // re-opened modal that may have switched into a different mode meanwhile.
+            const submittedMode = elMode.value;
+            const submittedToken = ++state.submitToken;
+            try {
+                if (submittedMode === 'upload') {
+                    if (!state.pendingFile) {
+                        toast.warning('No file selected', 'Choose a PDF first.');
+                        elSubmit.disabled = false;
+                        return;
+                    }
+                    elSubmit.classList.add('btn--loading');
+                    elSubmit.textContent = 'Uploading… 0%';
+                    await api.upload(state.pendingFile, fields, (loaded, total) => {
+                        const pct = total ? Math.round((loaded / total) * 100) : 0;
+                        elSubmit.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Saving…';
+                    });
+                    modal.close('metadata-modal');
+                    toast.success('Specification uploaded');
+                    await sidebar.loadFileList();
+                } else {
+                    const oldName = elOrigName.value;
+                    const result = await api.updateMetadata(oldName, fields);
+                    modal.close('metadata-modal');
+                    toast.success(result.renamed ? 'Saved & renamed' : 'Saved');
+                    const wasOpen = state.current && state.current.name === oldName;
+                    if (wasOpen) {
+                        state.current = { ...state.current, ...fields, name: result.name, url: result.url };
+                        // Repaint info bar + title so values are current even when no rename triggers reopen.
+                        updateInfoBar(state.current);
+                        updateTitle(state.current);
+                    }
+                    await sidebar.loadFileList();
+                    if (wasOpen && result.renamed) {
+                        const next = state.files.find(f => f.name === result.name);
+                        if (next) viewer.openFile(next);
+                    }
+                }
+            } catch (err) {
+                toast.danger('Action failed', err.message || String(err));
+            } finally {
+                elSubmit.disabled = false;
+                // Only restore label/spinner if this submit run is still the latest one.
+                // A newer open of the modal (different mode) bumps submitToken and we skip.
+                if (submittedToken === state.submitToken) {
+                    elSubmit.classList.remove('btn--loading');
+                    elSubmit.textContent = submittedMode === 'upload' ? 'Upload' : 'Save changes';
+                }
+            }
+        });
+
+        return { openUpload, openEdit, setPendingFile };
+    })();
+
+    /* =========================================================
+       REGION: SHORTCUTS
+       ========================================================= */
+    const shortcuts = {
+        init() {
+            document.addEventListener('keydown', this.handle);
+        },
+        handle(e) {
+            const tgt = e.target;
+            const editable = tgt && (
+                tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable
+            );
+            const mod = isMac ? e.metaKey : e.ctrlKey;
+
+            // Cmd/Ctrl chords work even from inputs, except when a modal owns the focus.
+            if (mod && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                if (modal.isOpen()) return;
+                const s = $('#search-input');
+                // On mobile the input is display:none until the toggle button reveals it.
+                if (window.getComputedStyle(s).display === 'none') {
+                    $('#search-toggle').click();
+                } else {
+                    s.focus(); s.select();
+                }
+                return;
+            }
+            if (mod && e.key.toLowerCase() === 'u') {
+                e.preventDefault();
+                if (modal.isOpen()) return;
+                metadataModal.openUpload();
+                return;
+            }
+
+            if (e.key === 'Escape') {
+                // Native <dialog> handles its own Esc via the 'cancel' event; this branch
+                // is defensive in case our keydown fires first (browser order is unspecified).
+                if (modal.isOpen()) { modal.closeTop(); return; }
+                if (!$('#dropzone').hidden) { dropzone.hide(); return; }
+                // Browsers also exit fullscreen on Esc natively; this line is a safety net.
+                if (document.fullscreenElement) { document.exitFullscreen(); return; }
+                return;
+            }
+
+            if (editable) return;
+
+            // ? is allowed from inside a modal (so the help overlay is always reachable);
+            // every other viewer-affecting shortcut is suppressed while a modal owns focus.
+            if (e.key === '?') { e.preventDefault(); modal.open('shortcuts-modal'); return; }
+            if (modal.isOpen()) return;
+
+            switch (e.key) {
+                case 'ArrowLeft':  if (state.pdfDoc) { e.preventDefault(); viewer.prev(); } break;
+                case 'ArrowRight': if (state.pdfDoc) { e.preventDefault(); viewer.next(); } break;
+                case '+':
+                case '=':          if (state.pdfDoc) { e.preventDefault(); viewer.zoomStep(+1); } break;
+                case '-':
+                case '_':          if (state.pdfDoc) { e.preventDefault(); viewer.zoomStep(-1); } break;
+                case 'f':
+                case 'F':          if (state.pdfDoc) { e.preventDefault(); viewer.toggleFullscreen(); } break;
+            }
+        },
+    };
+
+    /* =========================================================
+       REGION: DROPZONE
+       ========================================================= */
+    const dropzone = (() => {
+        const el = $('#dropzone');
+        let counter = 0;
+        let watchdog = null;
+
+        function show() { el.hidden = false; el.setAttribute('aria-hidden', 'false'); armWatchdog(); }
+        function hide() {
+            el.hidden = true;
+            el.setAttribute('aria-hidden', 'true');
+            counter = 0;
+            if (watchdog) { clearTimeout(watchdog); watchdog = null; }
+        }
+
+        // λ: if the browser ever swallows a leave/drop event (drag into a child iframe,
+        // drop on a non-event-firing element), the counter would stick at > 0 and the
+        // overlay would never hide. Re-armed on every dragover; if nothing fires for 700 ms
+        // the overlay is force-hidden.
+        function armWatchdog() {
+            if (watchdog) clearTimeout(watchdog);
+            watchdog = setTimeout(hide, 700);
+        }
+
+        function isFileDrag(e) {
+            return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+        }
+
+        function init() {
+            window.addEventListener('dragenter', (e) => {
+                if (!isFileDrag(e)) return;
+                counter++;
+                if (counter === 1) show();
+                else armWatchdog();
+            });
+            window.addEventListener('dragover', (e) => {
+                if (!isFileDrag(e)) return;
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+                armWatchdog();
+            });
+            window.addEventListener('dragleave', (e) => {
+                if (!isFileDrag(e)) return;
+                counter = Math.max(0, counter - 1);
+                if (counter === 0) hide();
+                else armWatchdog();
+            });
+            window.addEventListener('drop', (e) => {
+                if (!isFileDrag(e)) return;
+                e.preventDefault();
+                hide();
+                const files = Array.from(e.dataTransfer.files || []);
+                if (files.length === 0) return;
+                if (files.length > 1) {
+                    toast.warning('Single file only', 'Drop one PDF at a time.');
+                    return;
+                }
+                const file = files[0];
+                if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+                    toast.warning('PDF only', 'Only PDF files can be uploaded.');
+                    return;
+                }
+                // A: ignore drops while a modal is open so we don't wipe an in-progress edit.
+                if (modal.isOpen()) {
+                    toast.warning('Close the open dialog first', 'Then drop the PDF to start a new upload.');
+                    return;
+                }
+                metadataModal.openUpload(file);
+            });
+        }
+        return { init, show, hide };
+    })();
+
+    /* =========================================================
+       REGION: SIDEBAR
+       ========================================================= */
+    const sidebar = {
+        init() {
+            const searchInput = $('#search-input');
+            searchInput.addEventListener('input', (e) => this.filter(e.target.value.toLowerCase()));
+            $('#sidebar-toggle').addEventListener('click', () => this.toggleDrawer());
+            $('#sidebar-scrim').addEventListener('click', () => this.toggleDrawer(false));
+
+            // Mobile: toggle search overlay
+            const searchEl = $('.app-bar__search');
+            $('#search-toggle').addEventListener('click', () => {
+                const opened = searchEl.classList.toggle('is-active');
+                if (opened) { searchInput.focus(); searchInput.select(); }
+            });
+            const mobileMQ = window.matchMedia('(max-width: 640px)');
+            searchInput.addEventListener('blur', () => {
+                if (mobileMQ.matches && !searchInput.value) {
+                    searchEl.classList.remove('is-active');
+                }
+            });
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') { searchEl.classList.remove('is-active'); searchInput.blur(); }
+            });
+            // ι: scrub the mobile-only .is-active class when the viewport leaves the mobile range.
+            const onMobileChange = (mq) => {
+                if (!mq.matches) searchEl.classList.remove('is-active');
+            };
+            // addEventListener('change', …) is the modern API; addListener is the legacy one.
+            if (mobileMQ.addEventListener) mobileMQ.addEventListener('change', onMobileChange);
+            else if (mobileMQ.addListener) mobileMQ.addListener(onMobileChange);
+        },
+
+        toggleDrawer(force) {
+            const el = $('#sidebar');
+            const scrim = $('#sidebar-scrim');
+            const open = force == null ? !el.classList.contains('is-open') : !!force;
+            el.classList.toggle('is-open', open);
+            scrim.classList.toggle('is-visible', open);
+            $('#sidebar-toggle').setAttribute('aria-expanded', String(open));
+            // Mobile only: prevent tab focus from leaving the drawer into content beneath it.
+            const main = $('main.viewer');
+            const onMobile = window.matchMedia('(max-width: 900px)').matches;
+            if (main) {
+                if (open && onMobile) main.setAttribute('inert', '');
+                else main.removeAttribute('inert');
+            }
+        },
+
+        async loadFileList() {
+            const makeList = $('#make-list');
+            const modelList = $('#model-list');
+            this.showSkeleton(makeList, 8);
+            this.showSkeleton(modelList, 5);
+            try {
+                const files = await api.listPdfs();
+                state.files = files;
+                this.renderMakes(files);
+                viewer.refreshEmptyCopy();
+            } catch (err) {
+                toast.danger('Could not load documents', err.message || String(err));
+                makeList.innerHTML = '';
+                modelList.innerHTML = '';
+            }
+        },
+
+        showSkeleton(container, count) {
+            container.innerHTML = '';
+            const wrap = document.createElement('div');
+            wrap.setAttribute('aria-hidden', 'true');
+            for (let i = 0; i < count; i++) {
+                const row = document.createElement('div');
+                row.className = 'sidebar__skeleton-row';  // I (round 9): no inline cssText
+                wrap.appendChild(row);
+            }
+            container.appendChild(wrap);
+        },
+
+        renderMakes(files) {
+            const list = $('#make-list');
+            const modelList = $('#model-list');
+            // I: capture the focused element's key (make name / model filename) so we can
+            // restore keyboard focus after the rebuild — otherwise an upload/edit/delete
+            // bounces focus back to <body>.
+            const active = document.activeElement;
+            const focusedMake =
+                active && active.classList && active.classList.contains('make-item') ? active.dataset.make : null;
+            const focusedModelRow = active && active.closest ? active.closest('.model-item') : null;
+            const focusedModelName = focusedModelRow ? focusedModelRow.dataset.filename : null;
+
+            list.innerHTML = '';
+            modelList.innerHTML = '';
+
+            // Hand back focus after render. Stored on the sidebar for selectMake to pick up.
+            this._restoreFocus = { make: focusedMake, filename: focusedModelName };
+
+            if (!files.length) {
+                list.innerHTML = `
+                    <div class="sidebar__empty">
+                        <svg class="icon icon--lg"><use href="#icon-inbox"/></svg>
+                        <div>No specifications yet.</div>
+                    </div>`;
+                $('#makes-count').textContent = '0';
+                $('#models-count').textContent = '0';
+                return;
+            }
+
+            const grouped = {};
+            for (const f of files) {
+                const make = f.make || 'Unknown';
+                (grouped[make] = grouped[make] || []).push(f);
+            }
+            const makes = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+            $('#makes-count').textContent = String(makes.length);
+
+            for (const make of makes) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'make-item';
+                // A (round 8): plain button with aria-current; no broken listbox role.
+                btn.setAttribute('aria-current', 'false');
+                btn.dataset.make = make;
+                // D (round 9): tooltip on hover so truncated long names are still readable.
+                btn.title = make;
+                btn.innerHTML = `
+                    <span class="make-item__name"></span>
+                    <span class="make-item__count">${grouped[make].length}</span>
+                `;
+                btn.querySelector('.make-item__name').textContent = make;
+                btn.addEventListener('click', () => this.selectMake(make, grouped[make], btn));
+                list.appendChild(btn);
+            }
+
+            // Restore previous selection or pick first
+            const preferred = makes.find(m => m === state.selectedMake) || makes[0];
+            if (preferred) {
+                const el = Array.from(list.querySelectorAll('.make-item'))
+                    .find(b => b.dataset.make === preferred);
+                if (el) this.selectMake(preferred, grouped[preferred], el);
+            }
+
+            // Re-apply current filter
+            const q = $('#search-input').value.toLowerCase();
+            if (q) this.filter(q);
+
+            // I: hand keyboard focus back to whatever the user had selected before this rebuild.
+            const want = this._restoreFocus || {};
+            this._restoreFocus = null;
+            if (want.make) {
+                const el = Array.from(list.querySelectorAll('.make-item'))
+                    .find(b => b.dataset.make === want.make);
+                if (el) el.focus();
+            } else if (want.filename) {
+                const row = Array.from(modelList.querySelectorAll('.model-item'))
+                    .find(r => r.dataset.filename === want.filename);
+                if (row) {
+                    const btn = row.querySelector('.model-item__body');
+                    if (btn) btn.focus();
+                }
+            }
+        },
+
+        selectMake(name, files, btn) {
+            state.selectedMake = name;
+            $$('.make-item').forEach(el => {
+                const active = el === btn;
+                el.classList.toggle('is-active', active);
+                el.setAttribute('aria-current', active ? 'true' : 'false');
+            });
+
+            const list = $('#model-list');
+            list.innerHTML = '';
+
+            const grouped = {};
+            for (const f of files) {
+                const t = f.type || 'Other';
+                (grouped[t] = grouped[t] || []).push(f);
+            }
+            const types = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+            $('#models-count').textContent = String(files.length);
+
+            for (const type of types) {
+                const group = document.createElement('div');
+                group.className = 'type-group';
+                const head = document.createElement('div');
+                head.className = 'type-header';
+                head.textContent = type;
+                group.appendChild(head);
+
+                const models = grouped[type].slice().sort((a, b) =>
+                    (a.model || '').localeCompare(b.model || '')
+                );
+
+                for (const file of models) {
+                    const row = document.createElement('div');
+                    row.className = 'model-item';
+                    row.dataset.filename = file.name;
+
+                    const body = document.createElement('button');
+                    body.type = 'button';
+                    body.className = 'model-item__body';
+                    body.setAttribute('aria-current', 'false');
+                    // D (round 9): full label tooltip for truncated model names.
+                    body.title = (file.model || 'Unknown') + (file.capacity ? ` · ${file.capacity}` : '');
+                    body.innerHTML = `
+                        <div class="model-item__name"></div>
+                        <div class="model-item__capacity"></div>
+                    `;
+                    body.querySelector('.model-item__name').textContent = file.model || 'Unknown';
+                    body.querySelector('.model-item__capacity').textContent = file.capacity || '—';
+                    body.addEventListener('click', () => {
+                        if (window.matchMedia('(max-width: 900px)').matches) {
+                            sidebar.toggleDrawer(false);
+                        }
+                        viewer.openFile(file);
+                        $$('.model-item').forEach(el => {
+                            const active = el === row;
+                            el.classList.toggle('is-active', active);
+                            const btn = el.querySelector('.model-item__body');
+                            if (btn) btn.setAttribute('aria-current', active ? 'true' : 'false');
+                        });
+                    });
+
+                    const actions = document.createElement('div');
+                    actions.className = 'model-item__actions';
+
+                    const editBtn = document.createElement('button');
+                    editBtn.type = 'button';
+                    editBtn.className = 'model-item__action model-item__action--edit';
+                    editBtn.setAttribute('aria-label', 'Edit metadata');
+                    editBtn.title = 'Edit metadata';
+                    editBtn.innerHTML = '<svg class="icon"><use href="#icon-edit-3"/></svg>';
+                    editBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        metadataModal.openEdit(file);
+                    });
+
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'model-item__action model-item__action--delete';
+                    delBtn.setAttribute('aria-label', 'Delete specification');
+                    delBtn.title = 'Delete';
+                    delBtn.innerHTML = '<svg class="icon"><use href="#icon-trash-2"/></svg>';
+                    delBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        sidebar.deleteFile(file);
+                    });
+
+                    actions.appendChild(editBtn);
+                    actions.appendChild(delBtn);
+                    row.appendChild(body);
+                    row.appendChild(actions);
+
+                    if (state.current && state.current.name === file.name) {
+                        row.classList.add('is-active');
+                        body.setAttribute('aria-current', 'true');
+                    }
+
+                    group.appendChild(row);
+                }
+                list.appendChild(group);
+            }
+
+            const q = $('#search-input').value.toLowerCase();
+            if (q) sidebar.filter(q);
+        },
+
+        async deleteFile(file) {
+            const label = (file.model || file.name) + (file.capacity ? ' (' + file.capacity + ')' : '');
+            if (!confirm(`Delete “${label}”? This cannot be undone.`)) return;
+
+            // F + C: figure out the next sensible focus target BEFORE the rebuild — the
+            // next sibling row in the same type group, falling back to the previous one.
+            // If this was the only row in its group, look at adjacent type groups so focus
+            // doesn't drop to <body>.
+            let nextFocusFilename = null;
+            const allRows = Array.from(document.querySelectorAll('.model-item'));
+            const idx = allRows.findIndex(r => r.dataset.filename === file.name);
+            if (idx >= 0) {
+                const currentRow = allRows[idx];
+                const sameGroupRows = Array.from(
+                    currentRow.parentElement.querySelectorAll('.model-item')
+                );
+                const pos = sameGroupRows.indexOf(currentRow);
+                if (sameGroupRows[pos + 1]) {
+                    nextFocusFilename = sameGroupRows[pos + 1].dataset.filename;
+                } else if (sameGroupRows[pos - 1]) {
+                    nextFocusFilename = sameGroupRows[pos - 1].dataset.filename;
+                } else if (allRows[idx + 1]) {
+                    nextFocusFilename = allRows[idx + 1].dataset.filename;
+                } else if (allRows[idx - 1]) {
+                    nextFocusFilename = allRows[idx - 1].dataset.filename;
+                }
+            }
+
+            try {
+                await api.remove(file.name);
+                toast.success('Specification deleted');
+                if (state.current && state.current.name === file.name) {
+                    viewer.openEmpty();
+                }
+                await this.loadFileList();
+                if (nextFocusFilename) {
+                    const row = Array.from(document.querySelectorAll('.model-item'))
+                        .find(r => r.dataset.filename === nextFocusFilename);
+                    if (row) {
+                        const btn = row.querySelector('.model-item__body');
+                        if (btn) btn.focus();
+                    }
+                }
+            } catch (err) {
+                toast.danger('Delete failed', err.message || String(err));
+            }
+        },
+
+        filter(query) {
+            const q = (query || '').trim().toLowerCase();
+            const makeList = $('#make-list');
+            const modelList = $('#model-list');
+
+            // F (round 7) + I (round 9): use a class instead of inline style so a stricter
+            // CSP can drop 'unsafe-inline' from style-src-attr in the future.
+            let visibleMakes = 0;
+            $$('.make-item', makeList).forEach(el => {
+                const match = !q || el.textContent.toLowerCase().includes(q);
+                el.classList.toggle('is-hidden', !match);
+                if (match) visibleMakes++;
+            });
+            let visibleModels = 0;
+            $$('.type-group', modelList).forEach(group => {
+                let anyVisible = false;
+                $$('.model-item', group).forEach(item => {
+                    const match = !q || item.textContent.toLowerCase().includes(q);
+                    item.classList.toggle('is-hidden', !match);
+                    if (match) { anyVisible = true; visibleModels++; }
+                });
+                group.classList.toggle('is-hidden', !(anyVisible || !q));
+            });
+
+            this._showNoMatches(makeList, q && visibleMakes === 0, q);
+            this._showNoMatches(modelList, q && visibleModels === 0, q);
+        },
+
+        _showNoMatches(container, show, query) {
+            let banner = container.querySelector(':scope > .sidebar__no-matches');
+            // C (round 8): suppress the banner during the skeleton phase — the rows aren't
+            // rendered yet and the empty count is meaningless. We detect this by looking
+            // for actual rendered items (.make-item or .model-item) in the container.
+            const hasRendered = !!container.querySelector('.make-item, .model-item');
+            if (!show || !hasRendered) { if (banner) banner.remove(); return; }
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.className = 'sidebar__no-matches';
+                banner.setAttribute('role', 'status');
+                container.appendChild(banner);
+            }
+            banner.textContent = `No matches for "${query}"`;
+        },
+    };
+
+    /* =========================================================
+       REGION: VIEWER
+       ========================================================= */
+    const viewer = {
+        init() {
+            $('#prev-page').addEventListener('click', () => this.prev());
+            $('#next-page').addEventListener('click', () => this.next());
+            $('#zoom-in').addEventListener('click', () => this.zoomStep(+1));
+            $('#zoom-out').addEventListener('click', () => this.zoomStep(-1));
+            $('#zoom-level').addEventListener('click', () => this.cycleFit());
+            $('#fit-width').addEventListener('click', () => this.setFit('width'));
+            $('#fit-page').addEventListener('click', () => this.setFit('page'));
+            $('#fullscreen-btn').addEventListener('click', () => this.toggleFullscreen());
+            $('#download-btn').addEventListener('click', () => this.download());
+            $('#empty-upload-btn').addEventListener('click', () => metadataModal.openUpload());
+            $('#upload-trigger').addEventListener('click', () => metadataModal.openUpload());
+
+            $('#page-input').addEventListener('change', (e) => {
+                const n = parseInt(e.target.value, 10);
+                if (Number.isFinite(n)) this.goto(n);
+            });
+            $('#page-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+            });
+
+            document.addEventListener('fullscreenchange', () => {
+                const use = $('#fullscreen-icon use');
+                if (use) use.setAttribute('href', document.fullscreenElement ? '#icon-minimize' : '#icon-maximize');
+                if (state.pdfDoc) this.renderPage(state.pageNum);
+            });
+
+            let resizeT;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeT);
+                resizeT = setTimeout(() => {
+                    if (state.pdfDoc && state.fitMode !== 'custom') this.renderPage(state.pageNum);
+                }, 120);
+            });
+
+            this.openEmpty();
+        },
+
+        openEmpty() {
+            if (state.pdfDoc && typeof state.pdfDoc.destroy === 'function') {
+                try { state.pdfDoc.destroy(); } catch (_) {}
+            }
+            state.pdfDoc = null;
+            state.current = null;
+            state.pageNum = 1;
+            state.pageCount = 0;
+            $('#viewer-empty').hidden = false;
+            $('#info-bar').hidden = true;
+            $('#pdf-viewer').hidden = true;
+            $('#toolbar').hidden = true;
+            $$('.model-item.is-active').forEach(el => el.classList.remove('is-active'));
+            this.refreshEmptyCopy();
+            updateTitle(null);
+        },
+
+        refreshEmptyCopy() {
+            const hasFiles = state.files && state.files.length > 0;
+            const title = $('#viewer-empty-title');
+            const body  = $('#viewer-empty-body');
+            const cta   = $('#empty-upload-label');
+            if (hasFiles) {
+                title.textContent = 'No document selected';
+                body.textContent  = 'Choose a manufacturer and model from the sidebar, or drag a PDF onto the window to upload another.';
+                cta.textContent   = 'Upload another specification';
+            } else {
+                title.textContent = 'No specifications uploaded yet';
+                body.textContent  = 'Drag a PDF anywhere on this window, or click upload to add your first spec.';
+                cta.textContent   = 'Upload your first spec';
+            }
+        },
+
+        async openFile(file) {
+            const token = ++state.openToken;
+            state.current = file;
+            state.fitMode = 'page';
+            state.pageNum = 1;
+            $('#viewer-empty').hidden = true;
+            $('#info-bar').hidden = false;
+            $('#pdf-viewer').hidden = false;
+            $('#toolbar').hidden = false;
+            $('#viewer-skeleton').hidden = false;
+
+            updateInfoBar(file);
+            updateTitle(file);
+
+            // Free the previous document before loading the next one.
+            if (state.pdfDoc && typeof state.pdfDoc.destroy === 'function') {
+                try { state.pdfDoc.destroy(); } catch (_) {}
+            }
+            state.pdfDoc = null;
+            state.pageCount = 0;
+
+            try {
+                const doc = await pdfjsLib.getDocument(file.url).promise;
+                if (token !== state.openToken) {
+                    // A newer openFile() superseded us; throw away this doc.
+                    try { doc.destroy(); } catch (_) {}
+                    return;
+                }
+                state.pdfDoc = doc;
+                state.pageCount = doc.numPages;
+                $('#page-input').max = doc.numPages;
+                $('#page-input').value = 1;
+                $('#page-total').textContent = doc.numPages;
+                await this.renderPage(1);
+            } catch (err) {
+                if (token !== state.openToken) return;
+                $('#viewer-skeleton').hidden = true;
+                toast.danger('Could not open PDF', err.message || String(err));
+            }
+        },
+
+        async renderPage(num) {
+            if (!state.pdfDoc) return;
+            num = Math.max(1, Math.min(num, state.pageCount));
+            state.pageNum = num;
+            $('#page-input').value = num;
+
+            const token = ++state.renderToken;
+            try {
+                const page = await state.pdfDoc.getPage(num);
+                if (token !== state.renderToken) return;
+
+                const well = $('#pdf-viewer');
+                const styles = window.getComputedStyle(well);
+                const padX = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+                const padY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+                const availW = well.clientWidth - padX;
+                const availH = well.clientHeight - padY;
+                const base = page.getViewport({ scale: 1 });
+
+                let scale;
+                if (state.fitMode === 'width') {
+                    scale = availW / base.width;
+                } else if (state.fitMode === 'page') {
+                    scale = Math.min(availW / base.width, availH / base.height);
+                } else {
+                    scale = state.zoom;
+                }
+                if (state.fitMode !== 'custom') state.zoom = scale;
+
+                const dpr = Math.min(window.devicePixelRatio || 1, 3);
+                const viewport = page.getViewport({ scale });
+                const canvas = $('#pdf-canvas');
+                const ctx = canvas.getContext('2d');
+
+                canvas.width  = Math.floor(viewport.width  * dpr);
+                canvas.height = Math.floor(viewport.height * dpr);
+                canvas.style.width  = Math.floor(viewport.width)  + 'px';
+                canvas.style.height = Math.floor(viewport.height) + 'px';
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+                await page.render({ canvasContext: ctx, viewport }).promise;
+                if (token !== state.renderToken) return;
+
+                $('#viewer-skeleton').hidden = true;
+                $('#zoom-level').textContent = Math.round(scale * 100) + '%';
+                $('#prev-page').disabled = num <= 1;
+                $('#next-page').disabled = num >= state.pageCount;
+            } catch (err) {
+                if (token === state.renderToken) {
+                    $('#viewer-skeleton').hidden = true;
+                    console.error('PDF render error:', err);
+                }
+            }
+        },
+
+        prev() { if (state.pageNum > 1) this.renderPage(state.pageNum - 1); },
+        next() { if (state.pageNum < state.pageCount) this.renderPage(state.pageNum + 1); },
+        goto(n) { this.renderPage(n); },
+
+        zoomStep(direction) {
+            // Snap current zoom to closest step then move
+            let idx = 0, best = Infinity;
+            ZOOM_STEPS.forEach((z, i) => {
+                const d = Math.abs(z - state.zoom);
+                if (d < best) { best = d; idx = i; }
+            });
+            idx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, idx + direction));
+            state.fitMode = 'custom';
+            state.zoom = ZOOM_STEPS[idx];
+            this.renderPage(state.pageNum);
+        },
+
+        setFit(mode) {
+            state.fitMode = mode;
+            this.renderPage(state.pageNum);
+        },
+
+        cycleFit() {
+            const next = state.fitMode === 'page' ? 'width'
+                      : state.fitMode === 'width' ? 'custom'
+                      : 'page';
+            if (next === 'custom') {
+                state.fitMode = 'custom';
+                state.zoom = 1;
+            } else {
+                state.fitMode = next;
+            }
+            this.renderPage(state.pageNum);
+        },
+
+        toggleFullscreen() {
+            // Fullscreen <html> so the app bar, toasts, modals, and dropzone stay visible
+            // — only descendants of the fullscreened element render while in fullscreen.
+            const el = document.documentElement;
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+                return;
+            }
+            if (!el.requestFullscreen) {
+                toast.warning('Fullscreen unavailable', 'Your browser does not support fullscreen for this view.');
+                return;
+            }
+            el.requestFullscreen().catch(err => {
+                toast.warning('Could not enter fullscreen', err && err.message);
+            });
+        },
+
+        download() {
+            if (!state.current) return;
+            const a = document.createElement('a');
+            a.href = state.current.url;
+            a.download = state.current.original_filename || state.current.name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        },
+    };
+
+    /* =========================================================
+       REGION: BIND MODAL CLOSERS
+       ========================================================= */
+    $$('[data-modal-close]').forEach(btn => {
+        btn.addEventListener('click', () => modal.close(btn.getAttribute('data-modal-close')));
+    });
+    $('#help-toggle').addEventListener('click', () => modal.open('shortcuts-modal'));
+
+    /* =========================================================
+       REGION: INIT
+       =========================================================
+       NOTE: this module has a top-level `await import(...)` for PDF.js.
+       That means by the time we reach this point, DOMContentLoaded has
+       likely already fired (the spec lets DCL fire once a module reaches
+       its first await). Listening for DCL here would silently never run
+       and every click handler attached inside init() would be missing.
+       Since module scripts are deferred, the DOM is fully parsed when
+       this body executes — we can safely call start() directly, with
+       a fallback for the rare case where readyState is still 'loading'.
+    */
+    function start() {
+        localizeKbds();
+        theme.init();
+        shortcuts.init();
+        dropzone.init();
+        sidebar.init();
+        viewer.init();
+        sidebar.loadFileList();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+    } else {
+        start();
+    }
+    </script>
+</body>
 </html>
