@@ -1,1 +1,4 @@
 Flask==2.3.2
+
+# Dev / test only — needed for `pytest tests/`. Loose pin (pytest is API-stable).
+pytest>=8.0
