@@ -21,6 +21,19 @@ Deps: `pip install -r requirements.txt` (Flask 3.1.1, pytest, pytest-playwright)
 - `CRANE_MAX_FIELD_LEN` — max characters per metadata field (default: `64`)
 - `CRANE_TRUST_PROXY` — set to `1` **only** when running behind a reverse proxy (e.g. nginx) that terminates TLS and sets `X-Forwarded-Proto`/`X-Forwarded-For`. Wraps `app.wsgi_app` in Werkzeug's `ProxyFix` (`x_for=1, x_proto=1, x_host=1` — one hop only). Never enable this with no proxy in front — any client could then spoof its own scheme/IP and flip the CSRF cookie's `Secure` flag or dodge rate-limit keying. See RR-011/DL-020.
 
+**Docker deployment convention.** The published image (`ghcr.io/huttonhomehub/crane-charts`) has no hardcoded data path — unlike LinuxServer.io-style images, `CRANE_UPLOAD_DIR`/`CRANE_DB` default to plain relative paths (`uploads`, `crane.db`) under `WORKDIR /app`. To match this stack's other containers (e.g. `photomapper`'s `/config` convention), point both at a single mounted `/config` directory:
+```yaml
+environment:
+  - PUID=1000
+  - PGID=1000
+  - CRANE_TRUST_PROXY=1
+  - CRANE_UPLOAD_DIR=/config/uploads
+  - CRANE_DB=/config/crane.db
+volumes:
+  - /apps/crane-charts/config:/config
+```
+`docker-entrypoint.sh` (R-028) remaps the image's `crane` user to `PUID`/`PGID` and chowns whatever `CRANE_UPLOAD_DIR`/`CRANE_DB` resolve to at container start, so a freshly created (or root-owned) host directory just works — no manual `chown` needed before first start.
+
 ## Architecture
 
 Single-process Flask app. State is the `uploads/` directory plus `crane.db` (SQLite). Core files: [app.py](app.py), [templates/index.html](templates/index.html), [static/main.js](static/main.js), [static/main.css](static/main.css).
