@@ -7,9 +7,13 @@ tests in tests/test_app.py which cover validation edge-cases and concurrency.
 import base64
 import json
 import os
+import re
+import sqlite3
 
 import pytest
 from playwright.sync_api import Page, expect
+
+import app as app_module
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +65,27 @@ def _api_upload(page: Page, base_url: str, *, make: str, model_type: str,
             return r.json();
         }''',
         [base_url, csrf, make, model_type, model, capacity, _PDF_B64],
+    )
+
+
+def _api_add_file(page: Page, base_url: str, crane_id: str, *, label='Extra') -> dict:
+    """Attach a supplementary PDF to an existing crane from the browser context."""
+    csrf = _csrf_token(page)
+    return page.evaluate(
+        '''async ([url, csrf, craneId, label, pdfB64]) => {
+            const bytes = Uint8Array.from(atob(pdfB64), c => c.charCodeAt(0));
+            const blob = new Blob([bytes], { type: 'application/pdf' });
+            const fd = new FormData();
+            fd.append('file', blob, 'extra.pdf');
+            fd.append('label', label);
+            const r = await fetch(url + '/api/cranes/' + encodeURIComponent(craneId) + '/files', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': csrf },
+                body: fd,
+            });
+            return r.json();
+        }''',
+        [base_url, csrf, crane_id, label, _PDF_B64],
     )
 
 
@@ -205,21 +230,37 @@ class TestDeleteFlow:
 
 class TestVirtualScrolling:
     def test_large_make_renders_incrementally(self, page: Page, live_server: str, uploads_dir):
-        """R-017: seed enough files to exceed one render batch
-        (MODEL_RENDER_BATCH_SIZE = 60 in static/main.js) by writing them directly
-        into the uploads folder — bypassing the 10/min upload rate limit — with no
-        metadata row, so they group under the 'Unknown' make. Verifies the sidebar
-        renders only a first batch, then reveals the rest as #model-list is
-        scrolled (the IntersectionObserver sentinel firing)."""
+        """R-017: seed enough cranes to exceed one render batch
+        (MODEL_RENDER_BATCH_SIZE = 60 in static/main.js) by inserting rows directly
+        into the DB — bypassing the 10/min upload rate limit. All share one make
+        ('Vscroll') so a single make click lists them all. Verifies the sidebar
+        renders only a first batch, then reveals the rest as #model-list is scrolled
+        (the IntersectionObserver sentinel firing)."""
         total = 75
-        for i in range(total):
-            with open(os.path.join(uploads_dir, f'vscroll_{i:03d}.pdf'), 'wb') as f:
-                f.write(TINY_PDF)
+        with sqlite3.connect(app_module.DB_FILE) as conn:
+            for i in range(total):
+                cid = f'vscroll_bulk_m{i:03d}_1t'
+                conn.execute(
+                    '''INSERT OR IGNORE INTO cranes (id, make, type, model, capacity, uploaded_at, updated_at, primary_file)
+                       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)''',
+                    (cid, 'Vscroll', 'Bulk', f'M{i:03d}', '1t', '2026-01-01'),
+                )
+                crane_dir = os.path.join(uploads_dir, cid)
+                os.makedirs(crane_dir, exist_ok=True)
+                with open(os.path.join(crane_dir, 'f.pdf'), 'wb') as fh:
+                    fh.write(TINY_PDF)
+                cur = conn.execute(
+                    '''INSERT INTO files (crane_id, stored_name, original_filename, label, uploaded_at)
+                       VALUES (?, ?, ?, ?, ?)''',
+                    (cid, 'f.pdf', 'f.pdf', '', '2026-01-01'),
+                )
+                conn.execute('UPDATE cranes SET primary_file=? WHERE id=?', (cur.lastrowid, cid))
+            conn.commit()
 
         page.goto(live_server)
         page.wait_for_load_state('networkidle')
 
-        make_btn = page.locator('.make-item').filter(has_text='Unknown')
+        make_btn = page.locator('.make-item').filter(has_text='Vscroll')
         expect(make_btn).to_be_visible(timeout=5000)
         make_btn.click()
 
@@ -237,3 +278,80 @@ class TestVirtualScrolling:
             page.wait_for_timeout(150)
 
         expect(page.locator('.model-item')).to_have_count(total, timeout=5000)
+
+
+class TestMultiFileUI:
+    def test_file_strip_switch_and_set_primary(self, page: Page, live_server: str):
+        """Upload a crane, attach a second file, then drive the viewer file strip:
+        the row badge shows 2, opening the crane shows two chips, and setting the
+        supplementary file as main flips the primary indicator."""
+        page.goto(live_server)
+        result = _api_upload(page, live_server,
+                             make='Kobelco', model_type='Crawler',
+                             model='CK1100', capacity='110t')
+        assert result.get('success'), f'upload failed: {result}'
+        crane_id = result['id']
+
+        add = _api_add_file(page, live_server, crane_id, label='Outrigger chart')
+        assert add.get('file_count') == 2, f'add-file failed: {add}'
+
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        make_btn = page.locator('.make-item').filter(has_text='Kobelco')
+        expect(make_btn).to_be_visible(timeout=5000)
+        make_btn.click()
+
+        row = page.locator(f'.model-item[data-filename="{crane_id}"]')
+        expect(row).to_be_visible(timeout=5000)
+        expect(row.locator('.model-item__filecount')).to_have_text('2')
+
+        row.locator('.model-item__body').click()
+
+        # The strip appears with one chip per file.
+        expect(page.locator('#file-strip')).to_be_visible(timeout=5000)
+        expect(page.locator('.file-chip')).to_have_count(2)
+
+        # Set the supplementary file as the main file via its star action.
+        outrigger = page.locator('.file-chip').filter(has_text='Outrigger chart')
+        expect(outrigger).to_have_count(1)
+        outrigger.locator('.file-chip__action--primary').click()
+        expect(outrigger).to_have_class(re.compile(r'\bis-primary\b'), timeout=5000)
+
+        # Verify server-side that the primary actually changed.
+        pdfs = page.request.get(f'{live_server}/api/pdfs').json()['items']
+        crane = next(c for c in pdfs if c['id'] == crane_id)
+        primary = next(f for f in crane['files'] if f['is_primary'])
+        assert primary['label'] == 'Outrigger chart'
+
+    def test_delete_supplementary_file_keeps_crane(self, page: Page, live_server: str):
+        """Deleting a non-primary file via the strip removes just that chip and
+        leaves the crane in place."""
+        page.goto(live_server)
+        result = _api_upload(page, live_server,
+                             make='Sany', model_type='Crawler',
+                             model='SCC8100', capacity='100t')
+        assert result.get('success'), f'upload failed: {result}'
+        crane_id = result['id']
+        _api_add_file(page, live_server, crane_id, label='Transport dims')
+
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        page.locator('.make-item').filter(has_text='Sany').click()
+        row = page.locator(f'.model-item[data-filename="{crane_id}"]')
+        expect(row).to_be_visible(timeout=5000)
+        row.locator('.model-item__body').click()
+
+        expect(page.locator('.file-chip')).to_have_count(2)
+
+        # Delete the supplementary file; confirm the dialog.
+        supp = page.locator('.file-chip').filter(has_text='Transport dims')
+        supp.locator('.file-chip__action--delete').click()
+        expect(page.locator('#confirm-modal')).to_be_visible(timeout=3000)
+        page.locator('#confirm-ok').click()
+
+        # One chip remains; the crane still exists in the catalogue.
+        expect(page.locator('.file-chip')).to_have_count(1, timeout=5000)
+        pdfs = page.request.get(f'{live_server}/api/pdfs').json()['items']
+        assert any(c['id'] == crane_id for c in pdfs)

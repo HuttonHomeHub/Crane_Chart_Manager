@@ -673,6 +673,21 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     font-variant-numeric: tabular-nums;
 }
 
+/* Badge shown on model rows that hold more than one file. */
+.model-item__filecount {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 15px;
+    vertical-align: middle;
+    color: var(--accent-fg);
+    background: var(--accent);
+    border-radius: var(--radius-pill);
+    font-variant-numeric: tabular-nums;
+}
+
 .model-item__actions {
     display: flex;
     align-items: center;
@@ -792,6 +807,99 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     max-width: 240px;
 }
 .info-bar__value--accent { color: var(--accent); }
+
+/* Multi-file strip: one chip per document belonging to the open crane. */
+.file-strip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-6);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+    overflow-x: auto;
+}
+
+.file-strip__chips {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 2px 2px 4px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-pill);
+    background: var(--bg-surface-raised);
+    white-space: nowrap;
+    max-width: 260px;
+}
+
+.file-chip.is-active {
+    border-color: var(--accent-muted-border);
+    background: var(--accent-muted-bg);
+}
+
+.file-chip__open {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    min-width: 0;
+    border-radius: var(--radius-pill);
+    color: var(--fg-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.file-chip.is-active .file-chip__open { color: var(--fg-primary); }
+
+.file-chip__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 160px;
+}
+
+/* The star reads "this is the main file" — filled/amber on the primary chip,
+   faint elsewhere (where it doubles as the "set as main" control). */
+.file-chip__star { width: 14px; height: 14px; color: var(--fg-tertiary); flex-shrink: 0; }
+.file-chip.is-primary .file-chip__star { color: var(--accent); }
+
+.file-chip__action {
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    color: var(--fg-tertiary);
+}
+.file-chip__action .icon { width: 14px; height: 14px; }
+.file-chip__action:hover { background: var(--bg-surface-sunken); color: var(--fg-secondary); }
+.file-chip__action--delete:hover { color: var(--danger); }
+.file-chip__action--primary:disabled { display: none; }
+
+.file-strip__add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    flex-shrink: 0;
+    border: 1px dashed var(--border-default);
+    border-radius: var(--radius-pill);
+    color: var(--fg-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+.file-strip__add .icon { width: 15px; height: 15px; }
+.file-strip__add:hover { border-color: var(--accent-muted-border); color: var(--fg-primary); }
+
+/* Optional-field hint in the metadata modal (add-file label). */
+.form-field__hint { color: var(--fg-tertiary); font-weight: 400; }
 
 /* Canvas well */
 .viewer__well {

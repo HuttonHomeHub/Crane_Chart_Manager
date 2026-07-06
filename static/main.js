@@ -70,7 +70,8 @@ const state = {
     zoom: 1,                    // effective scale multiplier
     fitMode: 'page',            // 'page' | 'width' | 'custom'
     files: [],
-    current: null,              // currently-open file record
+    current: null,              // currently-open crane record
+    currentFile: null,          // which file of the crane is displayed
     selectedMake: null,
     pendingFile: null,          // file pending in upload modal
     renderToken: 0,
@@ -164,8 +165,50 @@ const api = {
         if (!r.ok) throw new Error((await safeErr(r)) || 'Update failed');
         return r.json();
     },
-    async remove(filename) {
-        const r = await fetch('/api/delete/' + encodeURIComponent(filename), {
+    async remove(craneId) {
+        // Deletes a whole crane (all its files).
+        const r = await fetch('/api/delete/' + encodeURIComponent(craneId), {
+            method: 'DELETE',
+            headers: { 'X-CSRF-Token': csrfToken() },
+        });
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Delete failed');
+        return r.json();
+    },
+    addFile(craneId, file, label, onProgress) {
+        // XHR (not fetch) so the modal can show real upload progress.
+        return new Promise((resolve, reject) => {
+            const fd = new FormData();
+            fd.append('file', file);
+            if (label) fd.append('label', label);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `/api/cranes/${encodeURIComponent(craneId)}/files`);
+            xhr.setRequestHeader('X-CSRF-Token', csrfToken());
+            xhr.responseType = 'json';
+            if (onProgress) {
+                xhr.upload.addEventListener('progress', (ev) => {
+                    if (ev.lengthComputable) onProgress(ev.loaded, ev.total);
+                });
+            }
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
+                else reject(new Error((xhr.response && xhr.response.error) || ('Upload failed (' + xhr.status + ')')));
+            };
+            xhr.onerror = () => reject(new Error('Network error during upload'));
+            xhr.onabort = () => reject(new Error('Upload aborted'));
+            xhr.send(fd);
+        });
+    },
+    async setPrimary(craneId, fileId) {
+        const r = await fetch(`/api/cranes/${encodeURIComponent(craneId)}/primary`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+            body: JSON.stringify({ file_id: fileId }),
+        });
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Could not set main file');
+        return r.json();
+    },
+    async deleteFile(craneId, fileId) {
+        const r = await fetch(`/api/cranes/${encodeURIComponent(craneId)}/files/${fileId}`, {
             method: 'DELETE',
             headers: { 'X-CSRF-Token': csrfToken() },
         });
@@ -391,10 +434,14 @@ const metadataModal = (() => {
     const elTitle     = $('#modal-title');
     const elMode      = $('#form-mode');
     const elOrigName  = $('#form-original-filename');
+    const elCraneId   = $('#form-crane-id');
     const elFileField = $('#file-field');
     const elFileInput = $('#file-input');
     const elPickerTxt = $('#file-picker-text');
     const elSubmit    = $('#form-submit-btn');
+    const elGrid      = $('#metadata-grid');
+    const elLabelField= $('#label-field');
+    const elLabel     = $('#label-input');
     const elMake      = $('#make-input');
     const elType      = $('#type-input');
     const elModel     = $('#model-input');
@@ -404,22 +451,28 @@ const metadataModal = (() => {
         state.pendingFile = null;
         elFileInput.value = '';
         elPickerTxt.textContent = 'Click to choose a PDF';
-        elMake.value = '';
-        elType.value = '';
-        elModel.value = '';
-        elCapacity.value = '';
+        elMake.value = elType.value = elModel.value = elCapacity.value = '';
+        elLabel.value = '';
+        elCraneId.value = '';
     }
 
-    function openUpload(file) {
+    // Shared setup for every open-mode.
+    function prep(mode) {
         reset();
         state.submitToken++;
         elSubmit.classList.remove('btn--loading');
         elSubmit.disabled = false;
-        elMode.value = 'upload';
+        elMode.value = mode;
+    }
+
+    function openUpload(file) {
+        prep('upload');
         elOrigName.value = '';
         elTitle.textContent = 'Upload crane specification';
         elSubmit.textContent = 'Upload';
         elFileField.hidden = false;
+        elGrid.hidden = false;
+        elLabelField.hidden = true;
         if (file) setPendingFile(file);
         // If a file is already chosen (drag-drop path), start on Manufacturer;
         // otherwise start on the file picker so keyboard users land there first.
@@ -427,20 +480,29 @@ const metadataModal = (() => {
     }
 
     function openEdit(record) {
-        reset();
-        state.submitToken++;
-        elSubmit.classList.remove('btn--loading');
-        elSubmit.disabled = false;
-        elMode.value = 'edit';
-        elOrigName.value = record.name;
+        prep('edit');
+        elOrigName.value = record.id || record.name;
         elTitle.textContent = 'Edit specification';
         elSubmit.textContent = 'Save changes';
         elFileField.hidden = true;
+        elGrid.hidden = false;
+        elLabelField.hidden = true;
         elMake.value     = record.make     || '';
         elType.value     = record.type     || '';
         elModel.value    = record.model    || '';
         elCapacity.value = record.capacity || '';
         modal.open('metadata-modal', { focus: '#make-input' });
+    }
+
+    function openAddFile(crane) {
+        prep('addfile');
+        elCraneId.value = crane.id;
+        elTitle.textContent = `Add file to ${(crane.make || '')} ${(crane.model || '')}`.trim() || 'Add file';
+        elSubmit.textContent = 'Add file';
+        elFileField.hidden = false;
+        elGrid.hidden = true;       // no make/type/model/capacity — inherited from the crane
+        elLabelField.hidden = false;
+        modal.open('metadata-modal', { focus: '#file-picker' });
     }
 
     function setPendingFile(file) {
@@ -455,79 +517,105 @@ const metadataModal = (() => {
 
     $('#file-picker').addEventListener('click', () => elFileInput.click());
 
+    function progressLabel(loaded, total) {
+        const pct = total ? Math.round((loaded / total) * 100) : 0;
+        elSubmit.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Saving…';
+    }
+
+    async function submitUpload(fields) {
+        elSubmit.classList.add('btn--loading');
+        elSubmit.textContent = 'Uploading… 0%';
+        await api.upload(state.pendingFile, fields, progressLabel);
+        modal.close('metadata-modal');
+        toast.success('Specification uploaded');
+        await sidebar.loadFileList();
+    }
+
+    async function submitAddFile() {
+        const craneId = elCraneId.value;
+        elSubmit.classList.add('btn--loading');
+        elSubmit.textContent = 'Uploading… 0%';
+        const updated = await api.addFile(craneId, state.pendingFile, elLabel.value.trim(), progressLabel);
+        modal.close('metadata-modal');
+        toast.success('File added');
+        if (state.current && state.current.id === craneId) viewer._applyCrane(updated);
+        await sidebar.loadFileList();
+    }
+
+    async function submitEdit(fields) {
+        const oldId = elOrigName.value;
+        const result = await api.updateMetadata(oldId, fields);
+        modal.close('metadata-modal');
+        toast.success(result.renamed ? 'Saved & renamed' : 'Saved');
+        const wasOpen = state.current && state.current.id === oldId;
+        await sidebar.loadFileList();
+        if (wasOpen && result.renamed) {
+            // Directory + file URLs changed — reopen the crane fresh.
+            const next = state.files.find(f => f.id === result.id);
+            if (next) viewer.openFile(next);
+        } else if (wasOpen) {
+            state.current = result;
+            updateInfoBar(result);
+            updateTitle(result);
+            viewer._renderStrip();
+        }
+    }
+
     $('#metadata-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const fields = {
-            make: elMake.value.trim(),
-            type: elType.value.trim(),
-            model: elModel.value.trim(),
-            capacity: elCapacity.value.trim(),
-        };
-        if (!fields.make || !fields.type || !fields.model || !fields.capacity) {
-            toast.warning('Missing details', 'All four fields are required.');
-            // D (round 8): focus the first empty field so the user can fix it immediately.
-            const first = [
-                [fields.make, elMake],
-                [fields.type, elType],
-                [fields.model, elModel],
-                [fields.capacity, elCapacity],
-            ].find(([v]) => !v);
-            if (first) first[1].focus();
+        const mode = elMode.value;
+
+        // File-bearing modes need a pending file.
+        if ((mode === 'upload' || mode === 'addfile') && !state.pendingFile) {
+            toast.warning('No file selected', 'Choose a PDF first.');
             return;
         }
+        // Metadata modes need all four fields.
+        let fields = null;
+        if (mode === 'upload' || mode === 'edit') {
+            fields = {
+                make: elMake.value.trim(),
+                type: elType.value.trim(),
+                model: elModel.value.trim(),
+                capacity: elCapacity.value.trim(),
+            };
+            if (!fields.make || !fields.type || !fields.model || !fields.capacity) {
+                toast.warning('Missing details', 'All four fields are required.');
+                const first = [
+                    [fields.make, elMake],
+                    [fields.type, elType],
+                    [fields.model, elModel],
+                    [fields.capacity, elCapacity],
+                ].find(([v]) => !v);
+                if (first) first[1].focus();
+                return;
+            }
+        }
+
         elSubmit.disabled = true;
         // Capture mode at submit time so the finally clause can't clobber a freshly
         // re-opened modal that may have switched into a different mode meanwhile.
-        const submittedMode = elMode.value;
+        const submittedMode = mode;
         const submittedToken = ++state.submitToken;
         try {
-            if (submittedMode === 'upload') {
-                if (!state.pendingFile) {
-                    toast.warning('No file selected', 'Choose a PDF first.');
-                    elSubmit.disabled = false;
-                    return;
-                }
-                elSubmit.classList.add('btn--loading');
-                elSubmit.textContent = 'Uploading… 0%';
-                await api.upload(state.pendingFile, fields, (loaded, total) => {
-                    const pct = total ? Math.round((loaded / total) * 100) : 0;
-                    elSubmit.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Saving…';
-                });
-                modal.close('metadata-modal');
-                toast.success('Specification uploaded');
-                await sidebar.loadFileList();
-            } else {
-                const oldName = elOrigName.value;
-                const result = await api.updateMetadata(oldName, fields);
-                modal.close('metadata-modal');
-                toast.success(result.renamed ? 'Saved & renamed' : 'Saved');
-                const wasOpen = state.current && state.current.name === oldName;
-                if (wasOpen) {
-                    state.current = { ...state.current, ...fields, name: result.name, url: result.url };
-                    // Repaint info bar + title so values are current even when no rename triggers reopen.
-                    updateInfoBar(state.current);
-                    updateTitle(state.current);
-                }
-                await sidebar.loadFileList();
-                if (wasOpen && result.renamed) {
-                    const next = state.files.find(f => f.name === result.name);
-                    if (next) viewer.openFile(next);
-                }
-            }
+            if (mode === 'upload')       await submitUpload(fields);
+            else if (mode === 'addfile') await submitAddFile();
+            else                         await submitEdit(fields);
         } catch (err) {
             toast.danger('Action failed', err.message || String(err));
         } finally {
             elSubmit.disabled = false;
             // Only restore label/spinner if this submit run is still the latest one.
-            // A newer open of the modal (different mode) bumps submitToken and we skip.
             if (submittedToken === state.submitToken) {
                 elSubmit.classList.remove('btn--loading');
-                elSubmit.textContent = submittedMode === 'upload' ? 'Upload' : 'Save changes';
+                elSubmit.textContent = submittedMode === 'upload' ? 'Upload'
+                                     : submittedMode === 'addfile' ? 'Add file'
+                                     : 'Save changes';
             }
         }
     });
 
-    return { openUpload, openEdit, setPendingFile };
+    return { openUpload, openEdit, openAddFile, setPendingFile };
 })();
 
 /* =========================================================
@@ -901,6 +989,16 @@ const sidebar = {
         `;
         body.querySelector('.model-item__name').textContent = file.model || 'Unknown';
         body.querySelector('.model-item__capacity').textContent = file.capacity || '—';
+        // Badge cranes that hold more than one document.
+        const fileCount = file.file_count || 1;
+        if (fileCount > 1) {
+            const badge = document.createElement('span');
+            badge.className = 'model-item__filecount';
+            badge.textContent = String(fileCount);
+            badge.title = `${fileCount} files`;
+            badge.setAttribute('aria-label', `${fileCount} files`);
+            body.querySelector('.model-item__name').appendChild(badge);
+        }
         body.addEventListener('click', () => {
             // R-016: use BP_TABLET from CSS custom property
             if (window.matchMedia(`(max-width: ${BP_TABLET}px)`).matches) {
@@ -1124,6 +1222,9 @@ const viewer = {
         $('#download-btn').addEventListener('click', () => this.download());
         $('#empty-upload-btn').addEventListener('click', () => metadataModal.openUpload());
         $('#upload-trigger').addEventListener('click', () => metadataModal.openUpload());
+        $('#file-strip-add').addEventListener('click', () => {
+            if (state.current) metadataModal.openAddFile(state.current);
+        });
 
         $('#page-input').addEventListener('change', (e) => {
             const n = parseInt(e.target.value, 10);
@@ -1156,10 +1257,12 @@ const viewer = {
         }
         state.pdfDoc = null;
         state.current = null;
+        state.currentFile = null;
         state.pageNum = 1;
         state.pageCount = 0;
         $('#viewer-empty').hidden = false;
         $('#info-bar').hidden = true;
+        $('#file-strip').hidden = true;
         $('#pdf-viewer').hidden = true;
         $('#toolbar').hidden = true;
         $$('.model-item.is-active').forEach(el => el.classList.remove('is-active'));
@@ -1183,19 +1286,35 @@ const viewer = {
         }
     },
 
-    async openFile(file) {
-        const token = ++state.openToken;
-        state.current = file;
-        state.fitMode = 'page';
-        state.pageNum = 1;
+    // Entry point from the sidebar: open a CRANE. Shows its file strip and loads
+    // the crane's primary file into the PDF viewer.
+    async openFile(crane) {
+        state.current = crane;
         $('#viewer-empty').hidden = true;
         $('#info-bar').hidden = false;
+        updateInfoBar(crane);
+        updateTitle(crane);
+        this._renderStrip();
+        const primary = this._primaryOf(crane);
+        if (primary) await this._loadPdf(primary);
+    },
+
+    _primaryOf(crane) {
+        const files = (crane && crane.files) || [];
+        return files.find(f => f.is_primary) || files[0] || null;
+    },
+
+    // Load a single file (of the current crane) into the viewer. Does not change
+    // which crane is selected — only which of its documents is displayed.
+    async _loadPdf(file) {
+        const token = ++state.openToken;
+        state.currentFile = file;
+        state.fitMode = 'page';
+        state.pageNum = 1;
         $('#pdf-viewer').hidden = false;
         $('#toolbar').hidden = false;
         $('#viewer-skeleton').hidden = false;
-
-        updateInfoBar(file);
-        updateTitle(file);
+        this._markActiveChip(file.id);
 
         // Free the previous document before loading the next one.
         if (state.pdfDoc && typeof state.pdfDoc.destroy === 'function') {
@@ -1207,7 +1326,7 @@ const viewer = {
         try {
             const doc = await pdfjsLib.getDocument(file.url).promise;
             if (token !== state.openToken) {
-                // A newer openFile() superseded us; throw away this doc.
+                // A newer _loadPdf() superseded us; throw away this doc.
                 try { doc.destroy(); } catch (_) {}
                 return;
             }
@@ -1221,6 +1340,129 @@ const viewer = {
             if (token !== state.openToken) return;
             $('#viewer-skeleton').hidden = true;
             toast.danger('Could not open PDF', err.message || String(err));
+        }
+    },
+
+    // Switch the displayed document within the current crane (from a strip chip).
+    showFile(fileId) {
+        if (!state.current) return;
+        const file = (state.current.files || []).find(f => f.id === fileId);
+        if (file) this._loadPdf(file);
+    },
+
+    _fileLabel(file) {
+        return file.label || file.original_filename || file.stored_name || 'Document';
+    },
+
+    _renderStrip() {
+        const strip = $('#file-strip');
+        const chips = $('#file-strip-chips');
+        const crane = state.current;
+        if (!crane) { strip.hidden = true; return; }
+        strip.hidden = false;
+        chips.innerHTML = '';
+        for (const file of crane.files || []) {
+            const chip = document.createElement('div');
+            chip.className = 'file-chip' + (file.is_primary ? ' is-primary' : '');
+            chip.dataset.fileId = String(file.id);
+
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.className = 'file-chip__open';
+            open.title = 'View ' + this._fileLabel(file);
+            open.innerHTML = `
+                <svg class="icon file-chip__star"><use href="#icon-check-circle-2"/></svg>
+                <span class="file-chip__label"></span>
+            `;
+            open.querySelector('.file-chip__label').textContent = this._fileLabel(file);
+            open.addEventListener('click', () => this.showFile(file.id));
+
+            const star = document.createElement('button');
+            star.type = 'button';
+            star.className = 'file-chip__action file-chip__action--primary';
+            star.title = file.is_primary ? 'This is the main file' : 'Set as main file';
+            star.setAttribute('aria-label', star.title);
+            star.disabled = !!file.is_primary;
+            star.innerHTML = '<svg class="icon"><use href="#icon-check-circle-2"/></svg>';
+            star.addEventListener('click', (e) => { e.stopPropagation(); this._setPrimary(file); });
+
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'file-chip__action file-chip__action--delete';
+            del.title = 'Delete this file';
+            del.setAttribute('aria-label', 'Delete ' + this._fileLabel(file));
+            del.innerHTML = '<svg class="icon"><use href="#icon-trash-2"/></svg>';
+            del.addEventListener('click', (e) => { e.stopPropagation(); this._deleteFile(file); });
+
+            chip.appendChild(open);
+            chip.appendChild(star);
+            chip.appendChild(del);
+            chips.appendChild(chip);
+        }
+        this._markActiveChip(state.currentFile && state.currentFile.id);
+    },
+
+    _markActiveChip(fileId) {
+        $$('#file-strip-chips .file-chip').forEach(el => {
+            el.classList.toggle('is-active', el.dataset.fileId === String(fileId));
+        });
+    },
+
+    // Replace state.current with a fresh crane record (from an add/set-primary/delete
+    // API response) and re-render the strip. Keeps the currently-displayed file if it
+    // still exists; otherwise falls back to the primary.
+    _applyCrane(crane) {
+        state.current = crane;
+        // Keep the sidebar's state.files entry in sync so the badge/counts are current.
+        const idx = state.files.findIndex(f => f.id === crane.id);
+        if (idx >= 0) state.files[idx] = crane;
+        this._renderStrip();
+        const shownId = state.currentFile && state.currentFile.id;
+        const stillThere = (crane.files || []).some(f => f.id === shownId);
+        if (!stillThere) {
+            const primary = this._primaryOf(crane);
+            if (primary) this._loadPdf(primary);
+        } else {
+            // Refresh the reference (is_primary may have flipped).
+            state.currentFile = crane.files.find(f => f.id === shownId);
+            this._markActiveChip(shownId);
+        }
+    },
+
+    async _setPrimary(file) {
+        if (!state.current) return;
+        try {
+            const updated = await api.setPrimary(state.current.id, file.id);
+            this._applyCrane(updated);
+            sidebar.loadFileList();
+            toast.success('Main file updated');
+        } catch (err) {
+            toast.danger('Could not set main file', err.message || String(err));
+        }
+    },
+
+    async _deleteFile(file) {
+        if (!state.current) return;
+        const crane = state.current;
+        const isLast = (crane.files || []).length <= 1;
+        const label = this._fileLabel(file);
+        const msg = isLast
+            ? `"${label}" is the only file. Deleting it removes the whole crane. Continue?`
+            : `Delete "${label}" from this crane? This cannot be undone.`;
+        const confirmed = await confirmDialog(msg);
+        if (!confirmed) return;
+        try {
+            const res = await api.deleteFile(crane.id, file.id);
+            toast.success('File deleted');
+            if (res.crane_deleted) {
+                viewer.openEmpty();
+                await sidebar.loadFileList();
+            } else {
+                this._applyCrane(res);
+                sidebar.loadFileList();
+            }
+        } catch (err) {
+            toast.danger('Delete failed', err.message || String(err));
         }
     },
 
@@ -1332,10 +1574,12 @@ const viewer = {
     },
 
     download() {
-        if (!state.current) return;
+        // Download whichever file is currently displayed (falls back to the crane primary).
+        const file = state.currentFile || (state.current && this._primaryOf(state.current));
+        if (!file) return;
         const a = document.createElement('a');
-        a.href = state.current.url;
-        a.download = state.current.original_filename || state.current.name;
+        a.href = file.url;
+        a.download = file.original_filename || file.stored_name || 'document.pdf';
         document.body.appendChild(a);
         a.click();
         // R-018: defer removal so browsers have time to initiate the download

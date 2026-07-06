@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import threading
 from datetime import datetime
@@ -168,22 +169,41 @@ def metadata_lock():
 
 
 def init_db():
-    """Create the SQLite schema if it does not exist. Safe to call multiple times."""
+    """Create the SQLite schema if it does not exist. Safe to call multiple times.
+
+    Data model (multi-file per crane): a `cranes` row is one crane specification
+    (make/type/model/capacity — the identity), owning one-or-many `files` rows.
+    `cranes.primary_file` points at the file that opens by default; NULL falls back
+    to the earliest-uploaded file. Files live on disk at uploads/<crane_id>/<stored_name>.
+    """
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute('PRAGMA journal_mode=WAL')
         conn.execute('''
-            CREATE TABLE IF NOT EXISTS specs (
-                filename         TEXT PRIMARY KEY,
-                make             TEXT NOT NULL,
-                type             TEXT NOT NULL,
-                model            TEXT NOT NULL,
-                capacity         TEXT NOT NULL,
-                uploaded_at      TEXT NOT NULL,
-                updated_at       TEXT,
-                original_filename TEXT
+            CREATE TABLE IF NOT EXISTS cranes (
+                id           TEXT PRIMARY KEY,
+                make         TEXT NOT NULL,
+                type         TEXT NOT NULL,
+                model        TEXT NOT NULL,
+                capacity     TEXT NOT NULL,
+                uploaded_at  TEXT NOT NULL,
+                updated_at   TEXT,
+                primary_file INTEGER
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS files (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                crane_id          TEXT NOT NULL,
+                stored_name       TEXT NOT NULL,
+                original_filename TEXT,
+                label             TEXT,
+                uploaded_at       TEXT NOT NULL,
+                UNIQUE(crane_id, stored_name)
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_files_crane ON files(crane_id)')
         # R-020: immutable append-only audit log; never updated, only inserted.
+        # `filename` holds the crane id (or affected file identifier) for the event.
         conn.execute('''
             CREATE TABLE IF NOT EXISTS spec_events (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,54 +251,129 @@ def _migrate_from_json():
         app.logger.exception('_migrate_from_json failed — continuing without migration')
 
 
-def load_metadata():
-    """Load all specs from SQLite. Returns {filename: {fields}} dict.
-    Returns {} if the database is missing or corrupt."""
+def _table_exists(conn, name):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _migrate_from_specs():
+    """One-time migration from the single-file `specs` table to the multi-file
+    cranes+files model. Each specs row becomes one crane with one (primary) file,
+    and its PDF is moved from uploads/<slug>.pdf to uploads/<slug>/<slug>.pdf.
+
+    Idempotent: skips cranes that already exist, so a partial run resumes safely.
+    Renames `specs` to `specs_legacy` on completion so it never re-migrates (and the
+    old rows are retained for rollback/history)."""
     try:
         with sqlite3.connect(DB_FILE) as conn:
             conn.row_factory = sqlite3.Row
+            if not _table_exists(conn, 'specs'):
+                return
             rows = conn.execute('SELECT * FROM specs').fetchall()
-        result = {}
-        for row in rows:
-            rec = {
-                'make': row['make'],
-                'type': row['type'],
-                'model': row['model'],
-                'capacity': row['capacity'],
-                'uploaded_at': row['uploaded_at'],
-                'original_filename': row['original_filename'] or row['filename'],
-            }
-            if row['updated_at']:
-                rec['updated_at'] = row['updated_at']
-            result[row['filename']] = rec
-        return result
+            migrated = 0
+            for row in rows:
+                filename = row['filename']
+                crane_id = filename[:-4] if filename.lower().endswith('.pdf') else filename
+                if conn.execute('SELECT 1 FROM cranes WHERE id=?', (crane_id,)).fetchone():
+                    continue
+                # Move the flat file into its crane directory.
+                src = os.path.join(UPLOAD_FOLDER, filename)
+                crane_dir = os.path.join(UPLOAD_FOLDER, crane_id)
+                dest = os.path.join(crane_dir, filename)
+                if os.path.exists(src) and not os.path.exists(dest):
+                    os.makedirs(crane_dir, exist_ok=True)
+                    os.rename(src, dest)
+                conn.execute(
+                    '''INSERT INTO cranes (id, make, type, model, capacity, uploaded_at, updated_at, primary_file)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)''',
+                    (crane_id, row['make'], row['type'], row['model'], row['capacity'],
+                     row['uploaded_at'], row['updated_at']),
+                )
+                cur = conn.execute(
+                    '''INSERT INTO files (crane_id, stored_name, original_filename, label, uploaded_at)
+                       VALUES (?, ?, ?, ?, ?)''',
+                    (crane_id, filename, row['original_filename'] or filename, '', row['uploaded_at']),
+                )
+                conn.execute('UPDATE cranes SET primary_file=? WHERE id=?', (cur.lastrowid, crane_id))
+                migrated += 1
+            conn.execute('ALTER TABLE specs RENAME TO specs_legacy')
+            conn.commit()
+        if migrated:
+            app.logger.info('migrated %d specs rows to cranes/files model', migrated)
+    except Exception:
+        app.logger.exception('_migrate_from_specs failed — continuing without migration')
+
+
+def _file_url(crane_id, stored_name):
+    return f"/uploads/{crane_id}/{stored_name}"
+
+
+def _crane_from_rows(crane_row, file_rows):
+    """Assemble the API dict for a crane from its DB row and its file rows.
+    Resolves the effective primary (explicit pointer, else earliest file) and
+    orders files primary-first."""
+    files = []
+    for f in file_rows:
+        files.append({
+            'id': f['id'],
+            'crane_id': crane_row['id'],
+            'stored_name': f['stored_name'],
+            'original_filename': f['original_filename'] or f['stored_name'],
+            'label': f['label'] or '',
+            'uploaded_at': f['uploaded_at'],
+            'url': _file_url(crane_row['id'], f['stored_name']),
+        })
+    primary = next((f for f in files if f['id'] == crane_row['primary_file']), None)
+    if primary is None and files:
+        primary = min(files, key=lambda f: (f['uploaded_at'], f['id']))
+    primary_id = primary['id'] if primary else None
+    for f in files:
+        f['is_primary'] = (f['id'] == primary_id)
+    files.sort(key=lambda f: (not f['is_primary'], f['uploaded_at'], f['id']))
+    return {
+        'id': crane_row['id'],
+        'name': crane_row['id'],   # sidebar/keying compat (was the .pdf filename)
+        'make': crane_row['make'],
+        'type': crane_row['type'],
+        'model': crane_row['model'],
+        'capacity': crane_row['capacity'],
+        'uploaded_at': crane_row['uploaded_at'],
+        'updated_at': crane_row['updated_at'],
+        'files': files,
+        'primary_file_id': primary_id,
+        'file_count': len(files),
+        # Primary-file conveniences so the sidebar can open a crane with one field.
+        'url': primary['url'] if primary else None,
+        'original_filename': primary['original_filename'] if primary else None,
+    }
+
+
+def list_cranes():
+    """Return all cranes (each with its files + resolved primary), sorted by id.
+    Returns [] if the database is missing or corrupt."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cranes = conn.execute('SELECT * FROM cranes ORDER BY id').fetchall()
+            by_crane = {}
+            for f in conn.execute('SELECT * FROM files').fetchall():
+                by_crane.setdefault(f['crane_id'], []).append(f)
+        return [_crane_from_rows(c, by_crane.get(c['id'], [])) for c in cranes]
     except sqlite3.DatabaseError as e:
         app.logger.warning('SQLite unreadable (%s); falling back to empty.', e)
-        return {}
+        return []
 
 
-def save_metadata(metadata):
-    """Persist the full metadata dict to SQLite via a DELETE+INSERT transaction.
-    Preserves the same call signature as the old JSON implementation."""
+def get_crane(crane_id):
+    """Return one crane dict (with files) or None."""
     with sqlite3.connect(DB_FILE) as conn:
-        conn.execute('DELETE FROM specs')
-        for filename, rec in metadata.items():
-            conn.execute(
-                '''INSERT INTO specs
-                   (filename, make, type, model, capacity, uploaded_at, updated_at, original_filename)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                (
-                    filename,
-                    rec.get('make', ''),
-                    rec.get('type', ''),
-                    rec.get('model', ''),
-                    rec.get('capacity', ''),
-                    rec.get('uploaded_at', datetime.now().isoformat()),
-                    rec.get('updated_at'),
-                    rec.get('original_filename', filename),
-                ),
-            )
-        conn.commit()
+        conn.row_factory = sqlite3.Row
+        crane = conn.execute('SELECT * FROM cranes WHERE id=?', (crane_id,)).fetchone()
+        if crane is None:
+            return None
+        files = conn.execute('SELECT * FROM files WHERE crane_id=?', (crane_id,)).fetchall()
+    return _crane_from_rows(crane, files)
 
 
 def log_event(event_type, filename, before=None, after=None):
@@ -331,15 +426,73 @@ def is_valid_pdf(file_storage) -> bool:
     file_storage.stream.seek(0)
     return header == _PDF_MAGIC
 
+def generate_crane_id(make, model_type, model, capacity):
+    """Deterministic slug identifying a crane: make_type_model_capacity, lowercased,
+    with non-[A-Za-z0-9._-] characters stripped. This is the cranes.id PK and the
+    per-crane directory name under uploads/."""
+    parts = (make, model_type, model, capacity)
+    joined = '_'.join(p.replace(' ', '_').replace('/', '_').lower() for p in parts)
+    return ''.join(c if c.isalnum() or c in '._-' else '' for c in joined)
+
+
 def generate_filename(make, model_type, model, capacity, original_ext='.pdf'):
-    """Generate a standardized filename from metadata"""
-    make_clean = make.replace(' ', '_').replace('/', '_').lower()
-    type_clean = model_type.replace(' ', '_').replace('/', '_').lower()
-    model_clean = model.replace(' ', '_').replace('/', '_').lower()
-    capacity_clean = capacity.replace(' ', '_').replace('/', '_').lower()
-    filename = f"{make_clean}_{type_clean}_{model_clean}_{capacity_clean}{original_ext}"
-    filename = ''.join(c if c.isalnum() or c in '._-' else '' for c in filename)
-    return filename
+    """Standardised filename from metadata (the crane slug plus an extension).
+    Retained for the legacy single-file naming and its unit test."""
+    return generate_crane_id(make, model_type, model, capacity) + original_ext
+
+
+def _sanitize_stored_name(original):
+    """Turn an uploaded filename into a safe, PDF-suffixed on-disk name."""
+    name = secure_filename(original or '') or 'document.pdf'
+    if not name.lower().endswith('.pdf'):
+        name += '.pdf'
+    return name
+
+
+def _dedupe_stored_name(crane_dir, stored_name):
+    """Ensure stored_name doesn't collide with an existing file in crane_dir by
+    appending _2, _3, … before the extension."""
+    if not os.path.exists(os.path.join(crane_dir, stored_name)):
+        return stored_name
+    base, ext = os.path.splitext(stored_name)
+    i = 2
+    while os.path.exists(os.path.join(crane_dir, f"{base}_{i}{ext}")):
+        i += 1
+    return f"{base}_{i}{ext}"
+
+
+def _crane_dir(crane_id):
+    return os.path.join(app.config['UPLOAD_FOLDER'], crane_id)
+
+
+def _reject_bad_pdf(file):
+    """Shared upload validation (upload + add-file). Returns an error response
+    tuple, or None if the file is a valid PDF."""
+    if file is None or file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Only PDF files are allowed'}), 400
+    # R-003: verify PDF magic bytes, not just the extension.
+    if not is_valid_pdf(file):
+        return jsonify({'error': 'Only PDF files are allowed'}), 400
+    return None
+
+
+def _audit_snapshot(crane):
+    """Compact metadata snapshot for the spec_events audit log."""
+    if not crane:
+        return None
+    return {
+        'id': crane['id'],
+        'make': crane['make'],
+        'type': crane['type'],
+        'model': crane['model'],
+        'capacity': crane['capacity'],
+        'files': [
+            {'label': f['label'], 'stored_name': f['stored_name'], 'is_primary': f['is_primary']}
+            for f in crane['files']
+        ],
+    }
 
 
 @app.route("/")
@@ -348,12 +501,12 @@ def index():
 
 @app.route("/api/pdfs", methods=['GET'])
 def get_pdfs():
-    """List uploaded PDFs with metadata.
+    """List cranes, each with its files and resolved primary.
 
-    R-011: supports cursor-based pagination via ?after=<filename>&limit=<n>.
-    Returns {"items": [...], "total": <int>, "next_cursor": "<filename>" | null}.
-    Omitting ?after / ?limit returns all items (backwards-compatible for callers
-    that don't yet pass pagination params).
+    R-011: cursor-based pagination via ?after=<crane_id>&limit=<n>.
+    Returns {"items": [...], "total": <int>, "next_cursor": "<crane_id>" | null}.
+    Each item is a crane: {id, name, make, type, model, capacity, url (primary),
+    files: [{id, url, label, is_primary, ...}], file_count, primary_file_id}.
     """
     try:
         after = request.args.get('after', '')
@@ -362,39 +515,18 @@ def get_pdfs():
         except ValueError:
             limit = 0
 
-        metadata = load_metadata()
-        files = []
-        for filename in os.listdir(UPLOAD_FOLDER):
-            if filename.lower().endswith('.pdf'):
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                # R-012: file may be deleted between listdir and getsize (TOCTOU).
-                try:
-                    size = os.path.getsize(filepath)
-                except OSError:
-                    continue
-                file_data = {
-                    'name': filename,
-                    'size': size,
-                    'url': f"/uploads/{filename}",
-                }
-                if filename in metadata:
-                    file_data.update(metadata[filename])
-                files.append(file_data)
-
-        files.sort(key=lambda x: x['name'])
-        total = len(files)
+        cranes = list_cranes()   # already sorted by id
+        total = len(cranes)
 
         if after:
-            idx = next((i for i, f in enumerate(files) if f['name'] == after), -1)
-            files = files[idx + 1:] if idx >= 0 else files
+            idx = next((i for i, c in enumerate(cranes) if c['id'] == after), -1)
+            cranes = cranes[idx + 1:] if idx >= 0 else cranes
 
         if limit > 0:
-            page_items = files[:limit]
-            # next_cursor is the last item of the current page; the caller sends
-            # ?after=<next_cursor> to get items that come after it alphabetically.
-            next_cursor = page_items[-1]['name'] if len(files) > limit else None
+            page_items = cranes[:limit]
+            next_cursor = page_items[-1]['id'] if len(cranes) > limit else None
         else:
-            page_items = files
+            page_items = cranes
             next_cursor = None
 
         return jsonify({'items': page_items, 'total': total, 'next_cursor': next_cursor})
@@ -405,7 +537,7 @@ def get_pdfs():
 @app.route("/api/upload", methods=['POST'])
 @limiter.limit("10 per minute")
 def upload_file():
-    """Upload a PDF file with metadata."""
+    """Create a new crane from its first (primary) PDF + metadata."""
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
 
@@ -415,15 +547,9 @@ def upload_file():
     model = request.form.get('model', 'Unknown')
     capacity = request.form.get('capacity', 'Unknown')
 
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-
-    if not allowed_file(file.filename):
-        return jsonify({'error': 'Only PDF files are allowed'}), 400
-
-    # R-003: verify PDF magic bytes, not just the extension.
-    if not is_valid_pdf(file):
-        return jsonify({'error': 'Only PDF files are allowed'}), 400
+    bad = _reject_bad_pdf(file)
+    if bad:
+        return bad
 
     try:
         cap_field(make, 'Manufacturer')
@@ -434,50 +560,160 @@ def upload_file():
         return jsonify({'error': str(e)}), 400
 
     try:
-        filename = generate_filename(make, model_type, model, capacity, '.pdf')
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        crane_id = generate_crane_id(make, model_type, model, capacity)
+        crane_dir = _crane_dir(crane_id)
+        now = datetime.now().isoformat()
 
         with metadata_lock():
-            if os.path.exists(filepath):
+            if get_crane(crane_id) is not None:
                 return jsonify({'error': 'File with these specifications already exists'}), 409
-            file.save(filepath)
-            metadata = load_metadata()
-            record = {
-                'make': make,
-                'type': model_type,
-                'model': model,
-                'capacity': capacity,
-                'uploaded_at': datetime.now().isoformat(),
-                'original_filename': secure_filename(file.filename),
-            }
-            metadata[filename] = record
-            save_metadata(metadata)
-            log_event('upload', filename, before=None, after=record)
+            os.makedirs(crane_dir, exist_ok=True)
+            stored_name = _dedupe_stored_name(crane_dir, _sanitize_stored_name(file.filename))
+            file.save(os.path.join(crane_dir, stored_name))
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute(
+                    '''INSERT INTO cranes (id, make, type, model, capacity, uploaded_at, updated_at, primary_file)
+                       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)''',
+                    (crane_id, make, model_type, model, capacity, now),
+                )
+                cur = conn.execute(
+                    '''INSERT INTO files (crane_id, stored_name, original_filename, label, uploaded_at)
+                       VALUES (?, ?, ?, ?, ?)''',
+                    (crane_id, stored_name, secure_filename(file.filename), '', now),
+                )
+                conn.execute('UPDATE cranes SET primary_file=? WHERE id=?', (cur.lastrowid, crane_id))
+                conn.commit()
+            crane = get_crane(crane_id)
+            log_event('upload', crane_id, before=None, after=_audit_snapshot(crane))
 
-        return jsonify({
-            'success': True,
-            'name': filename,
-            'url': f"/uploads/{filename}",
-            'make': make,
-            'type': model_type,
-            'model': model,
-            'capacity': capacity,
-        }), 201
+        return jsonify({'success': True, **crane}), 201
     except Exception:
         app.logger.exception('upload_file failed')
         return jsonify({'error': 'Internal server error'}), 500
 
-@app.route("/api/metadata/<filename>", methods=['PUT'])
+@app.route("/api/cranes/<crane_id>/files", methods=['POST'])
 @limiter.limit("30 per minute")
-def update_metadata(filename):
-    """Edit metadata for an existing PDF. Renames the file on disk if the
-    derived filename changes (filename is a deterministic slug of make/type/model/capacity)."""
-    try:
-        filename = secure_filename(filename)
-        old_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+def add_crane_file(crane_id):
+    """Attach a supplementary PDF to an existing crane, with an optional label."""
+    crane_id = secure_filename(crane_id)
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    label = (request.form.get('label') or '').strip()
 
-        if not os.path.exists(old_path):
-            return jsonify({'error': 'File not found'}), 404
+    bad = _reject_bad_pdf(file)
+    if bad:
+        return bad
+    try:
+        cap_field(label, 'Label')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    try:
+        with metadata_lock():
+            if get_crane(crane_id) is None:
+                return jsonify({'error': 'Crane not found'}), 404
+            crane_dir = _crane_dir(crane_id)
+            os.makedirs(crane_dir, exist_ok=True)
+            stored_name = _dedupe_stored_name(crane_dir, _sanitize_stored_name(file.filename))
+            file.save(os.path.join(crane_dir, stored_name))
+            now = datetime.now().isoformat()
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute(
+                    '''INSERT INTO files (crane_id, stored_name, original_filename, label, uploaded_at)
+                       VALUES (?, ?, ?, ?, ?)''',
+                    (crane_id, stored_name, secure_filename(file.filename), label, now),
+                )
+                conn.commit()
+            crane = get_crane(crane_id)
+            log_event('file_add', crane_id, before=None,
+                      after={'stored_name': stored_name, 'label': label})
+
+        return jsonify({'success': True, **crane}), 201
+    except Exception:
+        app.logger.exception('add_crane_file failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route("/api/cranes/<crane_id>/primary", methods=['PUT'])
+@limiter.limit("30 per minute")
+def set_primary_file(crane_id):
+    """Designate which file opens by default for a crane."""
+    crane_id = secure_filename(crane_id)
+    data = request.get_json(silent=True) or {}
+    try:
+        file_id = int(data.get('file_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'file_id is required'}), 400
+
+    try:
+        with metadata_lock():
+            crane = get_crane(crane_id)
+            if crane is None:
+                return jsonify({'error': 'Crane not found'}), 404
+            if not any(f['id'] == file_id for f in crane['files']):
+                return jsonify({'error': 'File not found on this crane'}), 404
+            before = {'primary_file_id': crane['primary_file_id']}
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute('UPDATE cranes SET primary_file=? WHERE id=?', (file_id, crane_id))
+                conn.commit()
+            crane = get_crane(crane_id)
+            log_event('primary_change', crane_id, before=before, after={'primary_file_id': file_id})
+
+        return jsonify({'success': True, **crane}), 200
+    except Exception:
+        app.logger.exception('set_primary_file failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route("/api/cranes/<crane_id>/files/<int:file_id>", methods=['DELETE'])
+@limiter.limit("30 per minute")
+def delete_crane_file(crane_id, file_id):
+    """Delete one file from a crane. Deleting the crane's last file deletes the
+    whole crane; deleting the primary lets it fall back to the earliest remaining."""
+    try:
+        crane_id = secure_filename(crane_id)
+        with metadata_lock():
+            crane = get_crane(crane_id)
+            if crane is None:
+                return jsonify({'error': 'Crane not found'}), 404
+            target = next((f for f in crane['files'] if f['id'] == file_id), None)
+            if target is None:
+                return jsonify({'error': 'File not found on this crane'}), 404
+
+            fpath = os.path.join(_crane_dir(crane_id), target['stored_name'])
+            if os.path.exists(fpath):
+                os.remove(fpath)
+
+            was_last = len(crane['files']) == 1
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute('DELETE FROM files WHERE id=?', (file_id,))
+                if was_last:
+                    conn.execute('DELETE FROM cranes WHERE id=?', (crane_id,))
+                elif crane['primary_file_id'] == file_id:
+                    conn.execute('UPDATE cranes SET primary_file=NULL WHERE id=?', (crane_id,))
+                conn.commit()
+
+            if was_last:
+                shutil.rmtree(_crane_dir(crane_id), ignore_errors=True)
+                log_event('delete', crane_id, before=_audit_snapshot(crane), after=None)
+                result = {'success': True, 'crane_deleted': True}
+            else:
+                updated = get_crane(crane_id)
+                log_event('file_remove', crane_id,
+                          before={'stored_name': target['stored_name']}, after=None)
+                result = {'success': True, 'crane_deleted': False, **updated}
+
+        return jsonify(result), 200
+    except Exception:
+        app.logger.exception('delete_crane_file failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route("/api/metadata/<crane_id>", methods=['PUT'])
+@limiter.limit("30 per minute")
+def update_metadata(crane_id):
+    """Edit a crane's metadata. Renames its uploads/<slug>/ directory (a single
+    atomic rename covering all its files) when the derived slug changes."""
+    try:
+        crane_id = secure_filename(crane_id)
 
         data = request.get_json(silent=True) or {}
         make = (data.get('make') or '').strip()
@@ -497,96 +733,85 @@ def update_metadata(filename):
             return jsonify({'error': str(e)}), 400
 
         with metadata_lock():
-            metadata = load_metadata()
-            existing = metadata.get(filename, {})
-            preserved = {
-                'uploaded_at': existing.get('uploaded_at', datetime.now().isoformat()),
-                'original_filename': existing.get('original_filename', filename),
-            }
+            crane = get_crane(crane_id)
+            if crane is None:
+                return jsonify({'error': 'File not found'}), 404
 
-            new_filename = generate_filename(make, model_type, model, capacity, '.pdf')
-            new_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+            new_id = generate_crane_id(make, model_type, model, capacity)
+            now = datetime.now().isoformat()
+            before = _audit_snapshot(crane)
 
-            record = {
-                'make': make,
-                'type': model_type,
-                'model': model,
-                'capacity': capacity,
-                'uploaded_at': preserved['uploaded_at'],
-                'original_filename': preserved['original_filename'],
-                'updated_at': datetime.now().isoformat(),
-            }
+            if new_id == crane_id:
+                with sqlite3.connect(DB_FILE) as conn:
+                    conn.execute(
+                        'UPDATE cranes SET make=?, type=?, model=?, capacity=?, updated_at=? WHERE id=?',
+                        (make, model_type, model, capacity, now, crane_id),
+                    )
+                    conn.commit()
+                updated = get_crane(crane_id)
+                log_event('edit', crane_id, before=before, after=_audit_snapshot(updated))
+                result = {'success': True, 'renamed': False, 'old_name': crane_id, **updated}
+            else:
+                if get_crane(new_id) is not None:
+                    return jsonify({'error': 'A specification with these details already exists'}), 409
 
-            if new_filename == filename:
-                metadata[filename] = record
-                save_metadata(metadata)
-                log_event('edit', filename, before=existing, after=record)
-                return jsonify({
-                    'success': True,
-                    'renamed': False,
-                    'name': filename,
-                    'url': f"/uploads/{filename}",
-                    **{k: record[k] for k in ('make', 'type', 'model', 'capacity')},
-                }), 200
+                old_dir = _crane_dir(crane_id)
+                new_dir = _crane_dir(new_id)
+                if os.path.exists(old_dir):
+                    os.rename(old_dir, new_dir)
+                try:
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute(
+                            'UPDATE cranes SET id=?, make=?, type=?, model=?, capacity=?, updated_at=? WHERE id=?',
+                            (new_id, make, model_type, model, capacity, now, crane_id),
+                        )
+                        conn.execute('UPDATE files SET crane_id=? WHERE crane_id=?', (new_id, crane_id))
+                        conn.commit()
+                except Exception:
+                    # Roll back the directory rename so disk and DB stay in sync.
+                    if os.path.exists(new_dir) and not os.path.exists(old_dir):
+                        os.rename(new_dir, old_dir)
+                    raise
+                updated = get_crane(new_id)
+                log_event('edit', crane_id, before=before,
+                          after={**_audit_snapshot(updated), 'new_id': new_id})
+                result = {'success': True, 'renamed': True, 'old_name': crane_id, **updated}
 
-            if os.path.exists(new_path):
-                return jsonify({'error': 'A specification with these details already exists'}), 409
-
-            os.rename(old_path, new_path)
-            try:
-                metadata[new_filename] = record
-                if filename in metadata:
-                    del metadata[filename]
-                save_metadata(metadata)
-                log_event('edit', filename, before=existing, after={**record, 'new_filename': new_filename})
-            except Exception:
-                # Roll back the rename so disk and metadata stay in sync.
-                if os.path.exists(new_path) and not os.path.exists(old_path):
-                    os.rename(new_path, old_path)
-                raise
-
-        return jsonify({
-            'success': True,
-            'renamed': True,
-            'old_name': filename,
-            'name': new_filename,
-            'url': f"/uploads/{new_filename}",
-            **{k: record[k] for k in ('make', 'type', 'model', 'capacity')},
-        }), 200
+        return jsonify(result), 200
     except Exception:
         app.logger.exception('update_metadata failed')
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route("/uploads/<path:filename>", methods=['GET'])
 def download_file(filename):
-    """Serve uploaded PDF files. Sanitize the error to avoid leaking absolute paths."""
+    """Serve uploaded PDF files (uploads/<crane_id>/<stored_name>).
+    send_from_directory safe-joins the path, preventing traversal."""
     try:
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
     except NotFound:
         return jsonify({'error': 'File not found'}), 404
 
-@app.route("/api/delete/<filename>", methods=['DELETE'])
+@app.route("/api/delete/<crane_id>", methods=['DELETE'])
 @limiter.limit("30 per minute")
-def delete_file(filename):
-    """Delete a PDF and its metadata record.
+def delete_file(crane_id):
+    """Delete a whole crane — all its files, its directory, and its rows.
 
-    R-001: the entire existence-check + remove + metadata-rewrite sequence is held
-    inside metadata_lock() so it cannot race against a concurrent upload or edit.
+    R-001: the entire existence-check + remove + row-delete sequence is held inside
+    metadata_lock() so it cannot race against a concurrent upload or edit.
     """
     try:
-        filename = secure_filename(filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-
+        crane_id = secure_filename(crane_id)
         with metadata_lock():
-            if not os.path.exists(filepath):
+            crane = get_crane(crane_id)
+            if crane is None:
                 return jsonify({'error': 'File not found'}), 404
-            metadata = load_metadata()
-            before = metadata.get(filename)
-            os.remove(filepath)
-            if filename in metadata:
-                del metadata[filename]
-                save_metadata(metadata)
-            log_event('delete', filename, before=before, after=None)
+            before = _audit_snapshot(crane)
+            shutil.rmtree(_crane_dir(crane_id), ignore_errors=True)
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute('DELETE FROM files WHERE crane_id=?', (crane_id,))
+                conn.execute('DELETE FROM cranes WHERE id=?', (crane_id,))
+                conn.commit()
+            log_event('delete', crane_id, before=before, after=None)
 
         return jsonify({'success': True}), 200
     except Exception:
@@ -595,11 +820,11 @@ def delete_file(filename):
 
 @app.route("/api/export", methods=['GET'])
 def export_metadata():
-    """R-021: download the full catalogue as a JSON file for backup/migration."""
+    """R-021: download the full catalogue (cranes + files) as a JSON file."""
     try:
-        metadata = load_metadata()
+        catalogue = {c['id']: c for c in list_cranes()}
         resp = app.response_class(
-            response=json.dumps(metadata, indent=2),
+            response=json.dumps(catalogue, indent=2),
             status=200,
             mimetype='application/json',
         )
@@ -611,12 +836,12 @@ def export_metadata():
 
 @app.route("/health", methods=['GET'])
 def health():
-    """R-023: liveness probe for load balancers and uptime monitors."""
+    """R-023: liveness probe for load balancers and uptime monitors.
+    Reports the total number of stored files across all cranes."""
     try:
-        upload_count = sum(
-            1 for f in os.listdir(UPLOAD_FOLDER) if f.lower().endswith('.pdf')
-        )
-    except OSError:
+        with sqlite3.connect(DB_FILE) as conn:
+            upload_count = conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
+    except Exception:
         upload_count = -1
     return jsonify({'status': 'ok', 'uploads': upload_count}), 200
 
@@ -625,7 +850,8 @@ def health():
 # call init_db() again from their fixture after the patch, so each test gets its
 # own isolated database in tmp_path.
 init_db()
-_migrate_from_json()
+_migrate_from_json()   # legacy metadata.json -> specs (inert once done)
+_migrate_from_specs()  # single-file specs -> multi-file cranes/files
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

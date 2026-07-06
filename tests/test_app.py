@@ -11,7 +11,22 @@ import time
 import pytest
 
 import app as app_module
-from .conftest import upload, tiny_pdf_file
+from .conftest import upload, tiny_pdf_file, TINY_PDF
+
+
+def _hdrs(token):
+    return {'X-CSRF-Token': token, 'Cookie': f'{app_module.CSRF_COOKIE}={token}'}
+
+
+def _add_file(client, token, crane_id, *, filename='extra.pdf', label='Outrigger', body=None):
+    """Attach a supplementary PDF to an existing crane."""
+    return client.post(
+        f'/api/cranes/{crane_id}/files',
+        data={'file': (io.BytesIO(body if body is not None else TINY_PDF), filename),
+              'label': label},
+        headers=_hdrs(token),
+        content_type='multipart/form-data',
+    )
 
 
 # ----------------------------------------------------------------------
@@ -67,53 +82,58 @@ class TestUploadEditDelete:
         assert r.status_code == 201
         body = r.json
         assert body['success'] is True
-        assert body['name'] == 'tadano_mobile_ac100_100t.pdf'
-        assert os.path.exists(os.path.join(app_module.UPLOAD_FOLDER, body['name']))
-        stored = app_module.load_metadata()
-        assert body['name'] in stored
-        assert stored[body['name']]['make'] == 'Tadano'
+        assert body['id'] == 'tadano_mobile_ac100_100t'
+        assert body['name'] == body['id']          # sidebar keying compat
+        assert body['file_count'] == 1
+        primary = body['files'][0]
+        assert primary['is_primary'] is True
+        # The PDF lives under the crane's directory: uploads/<crane_id>/<stored_name>.
+        stored_path = os.path.join(app_module.UPLOAD_FOLDER, body['id'], primary['stored_name'])
+        assert os.path.exists(stored_path)
+        crane = app_module.get_crane(body['id'])
+        assert crane is not None
+        assert crane['make'] == 'Tadano'
 
     def test_upload_duplicate_returns_409(self, client, csrf):
         upload(client, csrf)
-        r = upload(client, csrf)  # same fields → same derived filename
+        r = upload(client, csrf)  # same fields → same crane id
         assert r.status_code == 409
 
     def test_edit_with_rename(self, client, csrf):
         first = upload(client, csrf).json
         r = client.put(
-            f'/api/metadata/{first["name"]}',
+            f'/api/metadata/{first["id"]}',
             json={'make': 'Tadano', 'type': 'Mobile', 'model': 'AC100', 'capacity': '200t'},
-            headers={'X-CSRF-Token': csrf, 'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
+            headers=_hdrs(csrf),
         )
         assert r.status_code == 200
         assert r.json['renamed'] is True
-        assert r.json['name'] == 'tadano_mobile_ac100_200t.pdf'
-        # On-disk file renamed, old name gone.
-        assert not os.path.exists(os.path.join(app_module.UPLOAD_FOLDER, first['name']))
-        assert os.path.exists(os.path.join(app_module.UPLOAD_FOLDER, r.json['name']))
+        assert r.json['id'] == 'tadano_mobile_ac100_200t'
+        # The crane directory is renamed; the old one is gone.
+        assert not os.path.isdir(os.path.join(app_module.UPLOAD_FOLDER, first['id']))
+        assert os.path.isdir(os.path.join(app_module.UPLOAD_FOLDER, r.json['id']))
+        assert app_module.get_crane(first['id']) is None
+        assert app_module.get_crane(r.json['id']) is not None
 
     def test_edit_in_place_preserves_uploaded_at(self, client, csrf):
         first = upload(client, csrf).json
-        uploaded_at_before = app_module.load_metadata()[first['name']]['uploaded_at']
-        # Same fields → no rename, but updated_at added.
+        uploaded_at_before = app_module.get_crane(first['id'])['uploaded_at']
+        # Same fields → no rename, but updated_at is set.
         client.put(
-            f'/api/metadata/{first["name"]}',
+            f'/api/metadata/{first["id"]}',
             json={'make': 'Tadano', 'type': 'Mobile', 'model': 'AC100', 'capacity': '100t'},
-            headers={'X-CSRF-Token': csrf, 'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
+            headers=_hdrs(csrf),
         )
-        after = app_module.load_metadata()[first['name']]
+        after = app_module.get_crane(first['id'])
         assert after['uploaded_at'] == uploaded_at_before
-        assert 'updated_at' in after
+        assert after['updated_at'] is not None
 
     def test_delete_removes_file_and_metadata(self, client, csrf):
         first = upload(client, csrf).json
-        r = client.delete(
-            f'/api/delete/{first["name"]}',
-            headers={'X-CSRF-Token': csrf, 'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
-        )
+        r = client.delete(f'/api/delete/{first["id"]}', headers=_hdrs(csrf))
         assert r.status_code == 200
-        assert not os.path.exists(os.path.join(app_module.UPLOAD_FOLDER, first['name']))
-        assert first['name'] not in app_module.load_metadata()
+        assert not os.path.isdir(os.path.join(app_module.UPLOAD_FOLDER, first['id']))
+        assert app_module.get_crane(first['id']) is None
 
 
 # ----------------------------------------------------------------------
@@ -178,34 +198,28 @@ class TestValidation:
 # ----------------------------------------------------------------------
 
 class TestMetadataPersistence:
-    def test_save_metadata_roundtrip(self, app):
-        """save_metadata then load_metadata returns the same data."""
-        rec = {'make': 'A', 'type': 'T', 'model': 'M', 'capacity': '1t',
-               'uploaded_at': '2026-01-01T00:00:00', 'original_filename': 'a.pdf'}
+    def test_list_cranes_empty_returns_empty_list(self, app):
+        """A freshly initialised database (no rows) must return []."""
         with app.app_context():
-            app_module.save_metadata({'a.pdf': rec})
-        stored = app_module.load_metadata()
-        assert 'a.pdf' in stored
-        assert stored['a.pdf']['make'] == 'A'
-        assert stored['a.pdf']['uploaded_at'] == '2026-01-01T00:00:00'
+            assert app_module.list_cranes() == []
 
-    def test_load_metadata_recovers_from_corrupt_db(self, app):
-        """A corrupt SQLite file must not raise — it returns {} and logs a warning."""
+    def test_get_crane_missing_returns_none(self, app):
+        with app.app_context():
+            assert app_module.get_crane('does_not_exist') is None
+
+    def test_list_cranes_recovers_from_corrupt_db(self, app):
+        """A corrupt SQLite file must not raise — it returns [] and logs a warning."""
         with open(app_module.DB_FILE, 'wb') as f:
             f.write(b'not a sqlite database')
         with app.app_context():
-            assert app_module.load_metadata() == {}
-
-    def test_load_metadata_empty_db_returns_empty_dict(self, app):
-        """A freshly initialised database (no rows) must return {}."""
-        with app.app_context():
-            assert app_module.load_metadata() == {}
+            assert app_module.list_cranes() == []
 
     def test_concurrent_metadata_writes_serialize(self, app):
-        """Two-phase test of the fcntl lock under contention. Each worker holds the
-        lock, reads, sleeps briefly (to widen the window for lost-update races),
-        writes back. Without the lock, simultaneous read-modify-write would drop
-        most entries; with it, all N persist."""
+        """Guardrail for metadata_lock() under contention. Each worker holds the lock,
+        reads all crane rows, sleeps (to widen the window for lost-update races), and
+        rewrites the table (DELETE + INSERT-all — the same read-modify-write pattern the
+        routes rely on). Without the lock, simultaneous cycles would drop most rows;
+        with it, all N persist."""
         N = 20
         errors = []
 
@@ -213,10 +227,24 @@ class TestMetadataPersistence:
             try:
                 with app.app_context():
                     with app_module.metadata_lock():
-                        m = app_module.load_metadata()
-                        time.sleep(0.001)  # broaden the race window
-                        m[f'file_{i}.pdf'] = {'make': f'M{i}'}
-                        app_module.save_metadata(m)
+                        with sqlite3.connect(app_module.DB_FILE) as c:
+                            c.row_factory = sqlite3.Row
+                            rows = [dict(r) for r in c.execute('SELECT * FROM cranes')]
+                            time.sleep(0.001)  # broaden the race window
+                            rows.append({'id': f'c{i}', 'make': f'M{i}', 'type': 'T',
+                                         'model': 'Md', 'capacity': '1t',
+                                         'uploaded_at': '2026-01-01', 'updated_at': None,
+                                         'primary_file': None})
+                            c.execute('DELETE FROM cranes')
+                            for r in rows:
+                                c.execute(
+                                    '''INSERT INTO cranes
+                                       (id, make, type, model, capacity, uploaded_at, updated_at, primary_file)
+                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                                    (r['id'], r['make'], r['type'], r['model'], r['capacity'],
+                                     r['uploaded_at'], r['updated_at'], r['primary_file']),
+                                )
+                            c.commit()
             except Exception as e:
                 errors.append((i, repr(e)))
 
@@ -224,8 +252,8 @@ class TestMetadataPersistence:
         for t in threads: t.start()
         for t in threads: t.join(timeout=10)
         assert not errors, f'worker errors: {errors}'
-        stored = app_module.load_metadata()
-        assert len(stored) == N, f'expected {N} entries, got {len(stored)}: {list(stored)}'
+        stored = app_module.list_cranes()
+        assert len(stored) == N, f'expected {N} cranes, got {len(stored)}'
 
 
 # ----------------------------------------------------------------------
@@ -343,12 +371,12 @@ class TestDeleteFileLock:
         """
         N = 10
 
-        # Phase 1: pre-upload N files to be deleted later.
+        # Phase 1: pre-upload N cranes to be deleted later.
         victims = []
         for i in range(N):
             r = upload(client, csrf, make=f'Del{i}', type_='T', model='M', capacity='1t')
             assert r.status_code == 201, f'pre-upload {i} failed: {r.json}'
-            victims.append(r.json['name'])
+            victims.append(r.json['id'])
 
         # Reset rate-limit counters so the concurrent phase starts with a clean slate.
         app_module.limiter.reset()
@@ -388,13 +416,13 @@ class TestDeleteFileLock:
 
         assert not errors, f'thread errors: {errors}'
 
-        # Every new upload must be present in metadata.
-        stored = app_module.load_metadata()
+        # Every new upload must be present as a crane.
+        stored_ids = {c['id'] for c in app_module.list_cranes()}
 
         missing = []
         for i in range(N):
-            expected = app_module.generate_filename(f'New{i}', 'T', 'M', '2t', '.pdf')
-            if expected not in stored:
+            expected = app_module.generate_crane_id(f'New{i}', 'T', 'M', '2t')
+            if expected not in stored_ids:
                 missing.append(expected)
 
         assert not missing, f'metadata lost for: {missing}'
@@ -551,3 +579,119 @@ class TestAuditTrail:
         assert len(rows) == 1
         assert rows[0]['snapshot_before'] is not None
         assert rows[0]['snapshot_after'] is not None
+
+    def test_add_file_logs_event(self, app, client, csrf):
+        """A supplementary file upload must log a 'file_add' event."""
+        crane = upload(client, csrf).json
+        _add_file(client, csrf, crane['id'], label='Outrigger')
+        with sqlite3.connect(app_module.DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM spec_events WHERE event_type='file_add'"
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]['filename'] == crane['id']
+
+
+# ----------------------------------------------------------------------
+# Multi-file per crane (files, primary selection, per-file delete)
+# ----------------------------------------------------------------------
+
+class TestMultiFile:
+    def test_add_file_to_crane(self, client, csrf):
+        crane = upload(client, csrf).json
+        r = _add_file(client, csrf, crane['id'], filename='outrigger.pdf', label='Outrigger chart')
+        assert r.status_code == 201
+        assert r.json['file_count'] == 2
+        labels = [f['label'] for f in r.json['files']]
+        assert 'Outrigger chart' in labels
+        # Exactly one primary remains after adding a supplementary file.
+        assert sum(1 for f in r.json['files'] if f['is_primary']) == 1
+        # Both files live on disk under the crane directory.
+        crane_dir = os.path.join(app_module.UPLOAD_FOLDER, crane['id'])
+        assert len(os.listdir(crane_dir)) == 2
+
+    def test_add_file_to_missing_crane_returns_404(self, client, csrf):
+        r = _add_file(client, csrf, 'no_such_crane', label='x')
+        assert r.status_code == 404
+
+    def test_add_file_rejects_non_pdf(self, client, csrf):
+        crane = upload(client, csrf).json
+        r = _add_file(client, csrf, crane['id'], filename='evil.pdf', body=b'<html>nope</html>')
+        assert r.status_code == 400
+        assert 'PDF' in r.json['error']
+
+    def test_add_file_dedupes_stored_name(self, client, csrf):
+        """Two supplementary files with the same original name don't collide on disk."""
+        crane = upload(client, csrf).json
+        _add_file(client, csrf, crane['id'], filename='dims.pdf', label='A')
+        r = _add_file(client, csrf, crane['id'], filename='dims.pdf', label='B')
+        assert r.status_code == 201
+        stored = sorted(f['stored_name'] for f in r.json['files'])
+        assert len(set(stored)) == len(stored)  # all unique
+
+    def test_set_primary_switches_default_file(self, client, csrf):
+        crane = upload(client, csrf).json
+        add = _add_file(client, csrf, crane['id']).json
+        supp = next(f for f in add['files'] if not f['is_primary'])
+        r = client.put(
+            f'/api/cranes/{crane["id"]}/primary',
+            json={'file_id': supp['id']},
+            headers=_hdrs(csrf),
+        )
+        assert r.status_code == 200
+        assert r.json['primary_file_id'] == supp['id']
+        primary = next(f for f in r.json['files'] if f['is_primary'])
+        assert primary['id'] == supp['id']
+        # The crane's convenience `url` now points at the new primary.
+        assert r.json['url'] == primary['url']
+
+    def test_set_primary_unknown_file_returns_404(self, client, csrf):
+        crane = upload(client, csrf).json
+        r = client.put(
+            f'/api/cranes/{crane["id"]}/primary',
+            json={'file_id': 999999},
+            headers=_hdrs(csrf),
+        )
+        assert r.status_code == 404
+
+    def test_set_primary_missing_file_id_returns_400(self, client, csrf):
+        crane = upload(client, csrf).json
+        r = client.put(f'/api/cranes/{crane["id"]}/primary', json={}, headers=_hdrs(csrf))
+        assert r.status_code == 400
+
+    def test_delete_one_file_keeps_crane(self, client, csrf):
+        crane = upload(client, csrf).json
+        add = _add_file(client, csrf, crane['id']).json
+        supp = next(f for f in add['files'] if not f['is_primary'])
+        r = client.delete(f'/api/cranes/{crane["id"]}/files/{supp["id"]}', headers=_hdrs(csrf))
+        assert r.status_code == 200
+        assert r.json['crane_deleted'] is False
+        assert r.json['file_count'] == 1
+        assert app_module.get_crane(crane['id']) is not None
+
+    def test_delete_last_file_deletes_crane(self, client, csrf):
+        crane = upload(client, csrf).json
+        only = crane['files'][0]
+        r = client.delete(f'/api/cranes/{crane["id"]}/files/{only["id"]}', headers=_hdrs(csrf))
+        assert r.status_code == 200
+        assert r.json['crane_deleted'] is True
+        assert app_module.get_crane(crane['id']) is None
+        assert not os.path.isdir(os.path.join(app_module.UPLOAD_FOLDER, crane['id']))
+
+    def test_delete_primary_falls_back_to_remaining(self, client, csrf):
+        crane = upload(client, csrf).json
+        primary = crane['files'][0]
+        add = _add_file(client, csrf, crane['id']).json
+        supp = next(f for f in add['files'] if not f['is_primary'])
+        r = client.delete(f'/api/cranes/{crane["id"]}/files/{primary["id"]}', headers=_hdrs(csrf))
+        assert r.status_code == 200
+        assert r.json['crane_deleted'] is False
+        remaining = r.json['files']
+        assert len(remaining) == 1
+        assert remaining[0]['id'] == supp['id']
+        assert remaining[0]['is_primary'] is True
+
+    def test_delete_file_on_missing_crane_returns_404(self, client, csrf):
+        r = client.delete('/api/cranes/nope/files/1', headers=_hdrs(csrf))
+        assert r.status_code == 404

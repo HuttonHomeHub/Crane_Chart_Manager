@@ -159,6 +159,16 @@
                 </div>
             </div>
 
+            <!-- Multi-file strip: one chip per file for the open crane; primary badged.
+                 Populated by viewer._renderStrip(); hidden when no crane is open. -->
+            <div class="file-strip" id="file-strip" hidden role="tablist" aria-label="Documents for this crane">
+                <div class="file-strip__chips" id="file-strip-chips"></div>
+                <button class="file-strip__add" id="file-strip-add" title="Add a supplementary PDF to this crane">
+                    <svg class="icon"><use href="#icon-upload-cloud"/></svg>
+                    <span>Add file</span>
+                </button>
+            </div>
+
             <div class="viewer__well" id="pdf-viewer" hidden>
                 <div class="viewer__skeleton" id="viewer-skeleton" hidden></div>
                 <canvas id="pdf-canvas"></canvas>
@@ -226,6 +236,7 @@
             <form id="metadata-form" novalidate>
                 <input type="hidden" id="form-mode" value="upload">
                 <input type="hidden" id="form-original-filename" value="">
+                <input type="hidden" id="form-crane-id" value="">
                 <div class="modal__body">
                     <div class="form-field" id="file-field">
                         <button type="button" class="file-picker" id="file-picker" aria-describedby="file-picker-hint">
@@ -235,7 +246,7 @@
                         </button>
                         <input id="file-input" type="file" accept="application/pdf,.pdf" hidden>
                     </div>
-                    <div class="form-grid">
+                    <div class="form-grid" id="metadata-grid">
                         <div class="form-field">
                             <label for="make-input">Manufacturer</label>
                             <input id="make-input" type="text" required placeholder="Liebherr, Tadano, Manitowoc…">
@@ -252,6 +263,10 @@
                             <label for="capacity-input">Rated capacity</label>
                             <input id="capacity-input" type="text" required placeholder="200 t">
                         </div>
+                    </div>
+                    <div class="form-field" id="label-field" hidden>
+                        <label for="label-input">File label <span class="form-field__hint">— optional</span></label>
+                        <input id="label-input" type="text" placeholder="Outrigger chart, Transport dimensions…">
                     </div>
                 </div>
                 <footer class="modal__footer">
