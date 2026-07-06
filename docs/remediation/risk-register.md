@@ -35,18 +35,18 @@ Last updated: 2026-07-06 (Session 4)
 - `SameSite=Strict` on the CSRF cookie limits cross-site cookie abuse
 
 **Current controls (self-hosted Docker + nginx deployment — re-evaluated 2026-07-06, DL-020):**
-- Access gating moves from Codespaces' port-forwarding to nginx: basic auth, mTLS, or an IP allowlist configured in the user's nginx, in front of the container.
-- App must run with `CRANE_TRUST_PROXY=1` so `request.is_secure`/`get_remote_address()` reflect the real client via `X-Forwarded-Proto`/`X-Forwarded-For` rather than nginx's own connection (see RR-011).
-- CSRF + `SameSite=Strict` still apply underneath the nginx gate.
+- Access is gated by **tinyauth** in front of nginx. The Nginx Proxy Manager proxy host for `cranecharts.huttonhomehub.co.uk` uses `auth_request /tinyauth;` on its `location /` block, so **every** path (including `/health`, `/api/*`, `/uploads/*`) requires a valid tinyauth session; unauthenticated requests are 302-redirected to the tinyauth login. **Verified 2026-07-06:** an incognito request to `/health` redirects to the tinyauth login page.
+- App runs with `CRANE_TRUST_PROXY=1`; the NPM `location /` block sets `Host`/`X-Forwarded-Proto`/`X-Forwarded-For` so `request.is_secure` and `get_remote_address()` reflect the real client (see RR-011). **Verified 2026-07-06:** the `crane_csrf` cookie is issued with `Secure` set over the public HTTPS URL, confirming `X-Forwarded-Proto` is landing.
+- CSRF + `SameSite=Strict` still apply underneath the tinyauth gate.
 
-**Residual risk:** The application itself still has zero credential checks of its own — it is entirely dependent on whatever sits in front of it (Codespaces' forwarding, or the operator's nginx config) being configured correctly. A misconfigured or missing nginx auth directive reopens the same full read/write/delete exposure. This has not changed in kind since the original acceptance — only the identity of "what's in front of it" has.
+**Residual risk:** The application itself still has zero credential checks of its own — it is entirely dependent on the tinyauth `auth_request` in NPM being present and correct. If that `location /` block is ever edited to drop `auth_request` (or a more-specific `location /api/` etc. is added without it), the full read/write/delete exposure returns. The control is now *verified in place* rather than *assumed*, but it lives in NPM config outside this repo, so it can't be regression-tested here.
 
 **Acceptance conditions:**
 - Codespaces deployment: port remains `private`.
-- Self-hosted deployment: nginx must have an auth gate (basic auth / mTLS / IP allowlist) in front of the app — verify this is actually configured before exposing the container, not assumed.
-- Re-evaluate on any further change to hosting model (e.g. if nginx's gate is ever removed, or the app is exposed with no proxy in front at all).
+- Self-hosted deployment: the tinyauth `auth_request` gate must remain on the NPM `location /` block, and no more-specific `location` may bypass it. Re-verify with an incognito `/health` request after any NPM proxy-host change.
+- Re-evaluate on any further change to hosting model (e.g. if the tinyauth gate is removed, or the app is exposed with no proxy in front at all).
 
-**Re-evaluation date:** On any further hosting model change.
+**Re-evaluation date:** On any further hosting model change, or any edit to the NPM proxy host for `cranecharts.huttonhomehub.co.uk`.
 
 ---
 
@@ -227,7 +227,7 @@ R-017 (virtual scrolling) closed — frontend-only change (batched DOM rendering
 
 **Description:** Raised when moving the app off Codespaces onto self-hosted Docker behind the user's own nginx. Two related issues: (1) without trusting `X-Forwarded-Proto`/`X-Forwarded-For`, the app can't tell TLS was terminated at nginx, so the CSRF cookie never gets `Secure`, and `Flask-Limiter`'s `get_remote_address()` keys every request off nginx's own IP instead of the real client; (2) `Flask-Limiter`'s `storage_uri="memory://"` keeps counters per-process — the Dockerfile's original 2-worker Gunicorn config would silently double every configured rate limit.
 
-**Resolution:** `app.wsgi_app` is wrapped in Werkzeug's `ProxyFix` (`x_for=1, x_proto=1, x_host=1`), gated behind `CRANE_TRUST_PROXY=1` so headers are trusted only when the operator confirms there's exactly one proxy hop in front (unconditional trust would let any client spoof its own IP/scheme). Dockerfile now runs a single Gunicorn worker, eliminating the rate-limiter split-brain without adding a new storage dependency. Verified manually: with `CRANE_TRUST_PROXY=1` and a forged `X-Forwarded-Proto: https` header, the CSRF cookie correctly receives `Secure`; without the env var (default), the same header is ignored (see `test_forwarded_proto_ignored_without_trust_proxy`).
+**Resolution:** `app.wsgi_app` is wrapped in Werkzeug's `ProxyFix` (`x_for=1, x_proto=1, x_host=1`), gated behind `CRANE_TRUST_PROXY=1` so headers are trusted only when the operator confirms there's exactly one proxy hop in front (unconditional trust would let any client spoof its own IP/scheme). Dockerfile now runs a single Gunicorn worker, eliminating the rate-limiter split-brain without adding a new storage dependency. Verified manually: with `CRANE_TRUST_PROXY=1` and a forged `X-Forwarded-Proto: https` header, the CSRF cookie correctly receives `Secure`; without the env var (default), the same header is ignored (see `test_forwarded_proto_ignored_without_trust_proxy`). **Verified in production 2026-07-06:** over the public HTTPS URL (`cranecharts.huttonhomehub.co.uk`, tinyauth + NPM, single hop, `CRANE_TRUST_PROXY=1`), the `crane_csrf` cookie is issued with `Secure` set — confirming NPM's `X-Forwarded-Proto` reaches the app and `ProxyFix` honours it.
 
 **Residual risk:** Only a single proxy hop is supported (`x_for=1` etc.) — chaining another proxy/CDN in front of nginx would need the `x_for`/`x_proto` counts increased. If throughput ever requires more than one Gunicorn worker, `storage_uri` must move to a shared backend (e.g. Redis) first, or the split-brain returns.
 
