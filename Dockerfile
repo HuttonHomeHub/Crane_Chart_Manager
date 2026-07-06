@@ -9,16 +9,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p uploads && chown crane:crane uploads
+# Build-time ownership so the no-volume-mounted default (bare 'uploads'/'crane.db'
+# under /app) is already correct — the entrypoint's runtime chown then only ever
+# has to touch an actual bind-mounted path, never the whole app tree.
+RUN chmod +x docker-entrypoint.sh && chown -R crane:crane /app
 
-USER crane
-
+# R-028: stays root at container start — docker-entrypoint.sh remaps the 'crane'
+# user to PUID/PGID, fixes ownership of the mounted data dirs, then drops to that
+# user via setpriv before exec'ing the CMD below. See docker-entrypoint.sh.
 VOLUME ["/app/uploads"]
 
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
 
 # R-027: single worker — Flask-Limiter's storage_uri="memory://" keeps rate-limit
 # counters in process memory. Multiple workers would each hold independent counters,
