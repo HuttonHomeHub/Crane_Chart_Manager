@@ -84,6 +84,10 @@
     --dur-slow: 240ms;
 
     --app-bar-h: 56px;
+
+    /* R-016: breakpoint values as unit-less integers; JS reads via getPropertyValue */
+    --bp-mobile: 640;
+    --bp-tablet: 900;
 }
 
 :root[data-theme="light"] {
@@ -319,6 +323,14 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
 }
 .btn--ghost:active { background: var(--border-subtle); }
 
+.btn--danger {
+    background: var(--danger-fg);
+    color: #fff;
+    font-weight: 600;
+}
+.btn--danger:hover  { filter: brightness(1.1); }
+.btn--danger:active { filter: brightness(0.9); }
+
 .btn--outline {
     border-color: var(--border-default);
     color: var(--fg-primary);
@@ -512,6 +524,12 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     overflow-y: auto;
     padding: var(--space-2);
     min-height: 0;
+}
+
+/* R-017: invisible IntersectionObserver target marking the end of the rendered
+   batch in #model-list; triggers loading the next batch on scroll. */
+.sidebar__sentinel {
+    height: 1px;
 }
 
 .sidebar__empty {
@@ -1101,6 +1119,7 @@ dialog.modal::backdrop {
 }
 
 .modal__panel--md { max-width: 640px; }
+.modal__panel--sm { max-width: 420px; }
 
 @keyframes slideUp {
     from { transform: translateY(16px) scale(0.98); opacity: 0; }

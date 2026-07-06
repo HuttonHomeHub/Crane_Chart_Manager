@@ -12,14 +12,7 @@ import pytest
 # Make the parent directory importable so we can `import app`.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Flask 2.3.2 + Werkzeug 3.x mismatch: Flask's test_client reads `werkzeug.__version__`
-# which Werkzeug 3 removed. Patch in a stub so the test client can construct itself.
-# The runtime app doesn't hit this code path.
-import werkzeug  # noqa: E402
-if not hasattr(werkzeug, '__version__'):
-    werkzeug.__version__ = 'unknown'
-
-import app as app_module  # noqa: E402
+import app as app_module
 
 
 TINY_PDF = (
@@ -36,18 +29,18 @@ TINY_PDF = (
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    """Flask app pinned to a per-test scratch UPLOAD_FOLDER + METADATA_FILE."""
+    """Flask app pinned to a per-test scratch UPLOAD_FOLDER + SQLite DB_FILE."""
     uploads = tmp_path / "uploads"
     uploads.mkdir()
-    metadata = tmp_path / "metadata.json"
-    lock = tmp_path / "metadata.json.lock"
+    db = tmp_path / "crane.db"
 
     monkeypatch.setattr(app_module, 'UPLOAD_FOLDER', str(uploads))
-    monkeypatch.setattr(app_module, 'METADATA_FILE', str(metadata))
-    monkeypatch.setattr(app_module, 'METADATA_LOCK', str(lock))
+    monkeypatch.setattr(app_module, 'DB_FILE', str(db))
     app_module.app.config['UPLOAD_FOLDER'] = str(uploads)
 
+    app_module.init_db()  # create tables in the per-test database
     app_module.app.config['TESTING'] = True
+    app_module.limiter.reset()
     return app_module.app
 
 

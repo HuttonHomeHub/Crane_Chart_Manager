@@ -1,0 +1,237 @@
+# Decision Log
+
+Programme: Crane Charts Engineering Remediation  
+Last updated: 2026-07-06 (Session 3)
+
+Each entry records a decision made during the programme, the reasoning, and consequences for the backlog.
+
+---
+
+## DL-001 — Wrap entire delete_file body in metadata_lock()
+
+**Date:** 2026-07-06  
+**Finding:** R-001  
+**Decision:** Move the 404 existence check inside `metadata_lock()` and wrap the full `os.remove` + load/save sequence.
+
+**Rationale:** If the check and the remove are not atomic with respect to the lock, a second request could pass the 404 check after the first has already removed the file, producing a spurious 500 instead of a clean 404. Keeping the existence check outside the lock was the original bug pattern — the fix must be holistic.
+
+**Consequences:** Slightly longer lock hold time during delete (still negligible). R-009 test added to guard against regression.
+
+---
+
+## DL-002 — Accept R-002 (no auth) as risk for current deployment model
+
+**Date:** 2026-07-06  
+**Finding:** R-002  
+**Decision:** Mark as ACCEPTED_RISK. Do not implement authentication in Session 1.
+
+**Rationale:** The application runs exclusively within GitHub Codespaces. Port 5000 is forwarded only to authenticated Codespaces sessions via HTTPS tunnelling. The Codespaces access model provides network-level authentication. Adding application-level auth now would add complexity without commensurate risk reduction for the current deployment. The risk must be re-evaluated if the application is ever exposed on a public URL or a VPS.
+
+**Re-evaluation trigger:** Any change to `devcontainer.json` port visibility, or any deployment outside Codespaces.
+
+**Risk register entry:** RR-001.
+
+---
+
+## DL-003 — Upgrade Flask to 3.x to eliminate Werkzeug shim
+
+**Date:** 2026-07-06  
+**Finding:** R-005  
+**Decision:** Upgrade to Flask==3.1.1, remove `werkzeug.__version__` shim from `tests/conftest.py`.
+
+**Rationale:** Flask 3.x maintains the same API surface used by this application (routes, blueprints, `jsonify`, `g`, `request`, `send_from_directory`, `before_request`/`after_request` hooks). The shim in conftest masked the mismatch. Upgrading removes the patching code and gives the test suite a faithful picture of the running application.
+
+**Consequences:** `requirements.txt` changes. `tests/conftest.py` loses 4 lines. All 23 existing tests must pass after upgrade.
+
+---
+
+## DL-004 — Implement env var config before Dockerfile
+
+**Date:** 2026-07-06  
+**Finding:** R-024, R-007  
+**Decision:** Complete R-024 (env vars) before R-007 (Dockerfile).
+
+**Rationale:** A Dockerfile that bakes in hardcoded paths is worse than no Dockerfile. R-024 takes 30 minutes and makes R-007 straightforward. Ordering enforced in master-plan Phase 1 → Phase 3.
+
+---
+
+## DL-005 — Self-host PDF.js before extracting JS module
+
+**Date:** 2026-07-06  
+**Finding:** R-004, R-014  
+**Decision:** Complete R-004 (self-host PDF.js) before R-014 (extract JS to static/main.js).
+
+**Rationale:** The `PDFJS_BASE` URL and the CDN `<link>` preloads are both in `index.html` today. If the JS is extracted to `static/main.js` first, the CDN URL change requires editing two files. Doing R-004 first means a single clean edit in the already-extracted file.
+
+**Consequences:** R-014 is BLOCKED on R-004. Recorded in backlog.
+
+---
+
+## DL-006 — Defer R-011 (pagination) until after R-019 (SQLite)
+
+**Date:** 2026-07-06  
+**Finding:** R-011, R-019  
+**Decision:** Do not implement pagination on the JSON-file backend. Implement it as part of the SQLite migration.
+
+**Rationale:** Cursor-based pagination on a flat JSON file requires sorting on every read and maintaining a cursor in the file bytes, which adds complexity without the performance benefit (the file must still be read in full). With SQLite, pagination is a trivial `LIMIT/OFFSET` or `WHERE filename > ?` query. Adding it now would create throw-away code.
+
+---
+
+## DL-007 — Defer R-017 (virtual scrolling) until R-011 is done
+
+**Date:** 2026-07-06  
+**Finding:** R-017, R-011  
+**Decision:** Virtual scrolling is pointless if the API still returns all records. Block R-017 on R-011.
+
+**Rationale:** If the API returns 1 000 records and the frontend renders only 20 at a time, the savings are real. If the API still returns 1 000 records, the virtual scroll only saves DOM rendering cost, not network or JSON-parse cost. The correct fix is the full stack: paginated API → incremental render.
+
+---
+
+## DL-008 — Add delete race test (R-009) immediately after R-001
+
+**Date:** 2026-07-06  
+**Finding:** R-009, R-001  
+**Decision:** Add `test_delete_does_not_lose_concurrent_upload` in the same session as R-001.
+
+**Rationale:** A fix without a regression test can be silently reverted. The concurrent metadata writes test gave us confidence in the existing lock. The delete fix deserves equivalent coverage immediately.
+
+---
+
+## DL-009 — Use os.environ.get() directly, no python-dotenv dependency
+
+**Date:** 2026-07-06  
+**Finding:** R-024  
+**Decision:** Use `os.environ.get('CRANE_…', default)` without adding `python-dotenv` or similar.
+
+**Rationale:** The application has zero runtime dependencies beyond Flask. Adding dotenv for env-var loading in a single-file app would add more complexity than value. In Codespaces, variables are set via devcontainer.json `remoteEnv`. In a Dockerfile, they are set via `ENV` or `-e` flags. `os.environ` covers both without extra code.
+
+---
+
+## DL-010 — Remove conftest Werkzeug shim as part of R-005
+
+**Date:** 2026-07-06  
+**Finding:** R-005  
+**Decision:** The shim removal is a completion criterion for R-005, not a separate finding.
+
+**Rationale:** The shim exists solely because of the Flask/Werkzeug mismatch. Once the mismatch is resolved, the shim is dead code. Tracking it as a separate item would fragment a single coherent change.
+
+---
+
+## DL-011 — Reset Flask-Limiter counter in app fixture to prevent test bleed
+
+**Date:** 2026-07-06  
+**Finding:** R-013  
+**Decision:** Call `app_module.limiter.reset()` in the `app` conftest fixture. Also reset between phases in tests that make more uploads than the per-minute limit allows.
+
+**Rationale:** Flask-Limiter with `storage_uri="memory://"` holds counters in a module-level dictionary. Since the test suite reuses the same `app_module` object (it monkeypatches attributes rather than creating a new Flask app), limiter counters bleed from one test into the next. The `app` fixture already resets paths/metadata; resetting the limiter is consistent with that pattern and preserves correct isolation.
+
+**Consequences:** The `TestDeleteFileLock.test_delete_does_not_lose_concurrent_upload` test also resets the limiter between its two phases, since it performs 20 total uploads.
+
+---
+
+## DL-012 — Gunicorn with --reload in devcontainer, make dev for debug server
+
+**Date:** 2026-07-06  
+**Finding:** R-006  
+**Decision:** Replace `flask --debug run` with `gunicorn --workers 1 --bind 0.0.0.0:5000 --reload app:app` in devcontainer `postAttachCommand`. Add `Makefile` with `dev` target (Flask debug) and `serve` target (Gunicorn) for developer convenience.
+
+**Rationale:** The devcontainer launch should match production behaviour. Gunicorn with `--reload` provides hot-reload like the Flask dev server without the Werkzeug debugger exposure. Developers who want the full debug experience can run `make dev`.
+
+---
+
+## DL-013 — Complete R-015, R-016, R-018 as part of R-014 JS extraction
+
+**Date:** 2026-07-06  
+**Finding:** R-014, R-015, R-016, R-018  
+**Decision:** Implement R-015, R-016, and R-018 in the same `static/main.js` write as R-014, rather than as separate edits.
+
+**Rationale:** All three items (confirm dialog, breakpoint sync, download anchor timing) are changes within the module body. Writing the file once with all changes applied is cleaner than writing it once for R-014 and then editing it three more times. The changes are small and orthogonal — no risk of interaction. Each change is labelled with its finding ID in the source.
+
+---
+
+## DL-014 — threading.Lock replaces fcntl.flock for SQLite migration
+
+**Date:** 2026-07-06  
+**Finding:** R-019  
+**Decision:** Replace `fcntl.flock` with `threading.Lock` as the application-level concurrency guard. Complement with SQLite WAL mode for storage-level locking.
+
+**Rationale:** `fcntl.flock` is POSIX-only and tied to the JSON file lock path. With SQLite, the database engine handles storage-level concurrency (WAL mode allows concurrent reads during writes). The application-level lock (`threading.Lock`) is still needed to serialise the load-modify-save cycle at the Python level — without it, two concurrent requests could both read stale state and then overwrite each other's writes. `threading.Lock` is cross-platform, requires no file on disk, and is idiomatic Python.
+
+**Consequences:** `fcntl` import removed. `METADATA_LOCK` global removed. `_metadata_lock_obj = threading.Lock()` added. `metadata_lock()` simplified to a context manager that acquires the threading lock. The concurrent-writes test still passes.
+
+---
+
+## DL-015 — save_metadata uses DELETE+INSERT transaction (not targeted SQL)
+
+**Date:** 2026-07-06  
+**Finding:** R-019  
+**Decision:** Keep `save_metadata(metadata)` taking a full dict and implementing DELETE+INSERT inside a single SQLite transaction. Do not switch to targeted per-row INSERT/UPDATE/DELETE in the routes.
+
+**Rationale:** The existing routes do a full read-modify-write cycle: `metadata = load_metadata(); ... ; save_metadata(metadata)`. Keeping this interface means zero changes to route logic, zero risk of regression, and all existing tests continue to pass without modification. The DELETE+INSERT is atomic from the application's perspective (the transaction either commits fully or rolls back). With <10 000 entries, performance is irrelevant. If performance becomes a concern, routes can be individually upgraded to targeted SQL.
+
+**Consequences:** `save_metadata()` is slightly expensive for large catalogues (rewrites all rows). Acceptable for this programme's scope. R-017 pagination removes the per-request full read anyway.
+
+---
+
+## DL-016 — GET /api/export as the operator backup path for R-021
+
+**Date:** 2026-07-06  
+**Finding:** R-021  
+**Decision:** Implement `GET /api/export` as the immediate deliverable for R-021, rather than a cron job or SQLite `.backup()` call.
+
+**Rationale:** The R-021 requirement is "no recovery path for accidental data loss." The most urgent element is giving operators a way to manually export all metadata before or after incidents. A browser-triggered JSON download accomplishes this with 15 lines of code. Automated backup cron jobs require cron configuration, storage paths, and retention policies — out of scope for this programme but documented as follow-up ops work.
+
+**Consequences:** R-021 marked CLOSED with the export endpoint as evidence. Automated scheduling is a follow-up ops task for Session 4+.
+
+---
+
+## DL-017 — next_cursor is last item of current page, not first of next
+
+**Date:** 2026-07-06  
+**Finding:** R-011  
+**Decision:** `next_cursor` in the `GET /api/pdfs` response is the filename of the last item on the current page. The caller sends `?after=<next_cursor>` to get items that come alphabetically after that filename.
+
+**Rationale:** This is the standard cursor pattern: the cursor identifies the last-seen item, not the next-to-be-seen item. The server implements `?after=X` by finding X in the sorted list and returning `list[idx+1:]`. This means the cursor is opaque to the client (it doesn't need to know it's a filename) and the server only needs one comparison. Alternative "first of next page" cursors require a `>=` comparison that can double-return an item on boundaries.
+
+**Consequences:** `next_cursor = page_items[-1]['name'] if len(files) > limit else None`. `api.listPdfs()` in `static/main.js` passes `?after=<cursor>` in each page loop iteration.
+
+---
+
+## DL-018 — E2E tests use session-scoped live server with fresh page per test
+
+**Date:** 2026-07-06  
+**Finding:** R-026  
+**Decision:** E2E conftest uses `scope='session'` for the live server (one server per test run) and function-scoped `page` (fresh browser context per test). The shared database accumulates uploads across tests.
+
+**Rationale:** Starting a new server per test would add ~300 ms per test and would require resetting the DB between tests. The session-scoped server is fast and avoids Flask's initialisation overhead. Tests are designed to be additive: each uploads uniquely-named files and verifies behaviour on those specific files. The delete test uses `data-filename` attribute matching rather than a count, which is robust to other files being present.
+
+**Consequences:** Tests are not isolated from each other's uploads. Parallelising E2E tests without worker partitioning would require per-worker servers. Accepted for the current single-worker CI setup.
+
+---
+
+## DL-019 — Virtual scrolling batches the render queue, not the network fetch
+
+**Date:** 2026-07-06  
+**Finding:** R-017  
+**Decision:** Keep `api.listPdfs()` fetching the full catalogue (now via bounded `PDFS_PAGE_SIZE=200` pages rather than one unbounded request) so the make/type grouping and counts in the sidebar stay correct. Implement the actual "virtual scrolling" as batched DOM insertion in `sidebar.selectMake()`, gated by an `IntersectionObserver` watching a sentinel element appended to `#model-list`.
+
+**Rationale:** The backend has no `?make=` filter, so make/type counts and grouping require the full metadata set regardless of how the network fetch is paced. The DOM cost — not the JSON-parse cost — is what scales badly with catalogue size (each `.model-item` row creates ~6 elements plus 3 listeners). Batching the render queue at `MODEL_RENDER_BATCH_SIZE = 60` items and only building rows as the user scrolls near the bottom directly addresses that cost. `api.listPdfs()` streaming pages via an `onPage` callback (used by `loadFileList()` to repaint as data arrives) is a secondary improvement for genuinely large catalogues, but is a no-op for the common case where everything fits in one page.
+
+**Consequences:** `sidebar.filter()` must flush the remaining render queue before matching text against `.model-item` elements, since a text search has to be able to find rows that haven't been scrolled into view yet. `_flushModelQueue()` handles this. Focus-restoration after upload/delete (`renderMakes`'s `_restoreFocus` lookup) can silently no-op if the previously-focused row falls outside the first rendered batch — an accepted tradeoff inherent to virtual scrolling, matching the precedent set by DL-018 for E2E test isolation tradeoffs.
+
+**Consequences (testing):** New E2E test `TestVirtualScrolling::test_large_make_renders_incrementally` writes 75 raw PDF files directly into the live server's upload folder (bypassing the 10/min upload rate limit) with no metadata row, so they land under the 'Unknown' make/'Other' type bucket. It asserts a partial first batch renders, then scrolls `#model-list` to trigger the sentinel and asserts all 75 eventually render.
+
+---
+
+## DL-020 — Trust reverse-proxy headers only when CRANE_TRUST_PROXY=1; gate access at nginx, not in the app
+
+**Date:** 2026-07-06  
+**Finding:** R-027 (new, raised by moving off Codespaces onto self-hosted Docker + nginx)  
+**Decision:** Two changes, both scoped to the deployment layer rather than the application's security model:
+1. Wrap `app.wsgi_app` in Werkzeug's `ProxyFix` (`x_for=1, x_proto=1, x_host=1`), but only when `CRANE_TRUST_PROXY=1` is explicitly set.
+2. Drop the Dockerfile's Gunicorn worker count from 2 to 1.
+3. Access control for the new deployment (Docker behind the user's own nginx, no longer inside Codespaces) is delegated to nginx — basic auth, mTLS, or an IP allowlist — rather than adding an app-level login. R-002 remains ACCEPTED_RISK; RR-001's conditions are updated to point at the nginx gate instead of Codespaces' network isolation.
+
+**Rationale:** Once the app sits behind nginx, two silent correctness bugs would otherwise ship: (a) `request.is_secure` and `get_remote_address()` read straight from the raw WSGI environ, which reflects nginx's own connection to the app, not the browser's connection to nginx — so the CSRF cookie would never get the `Secure` flag, and rate-limit keys would collapse onto nginx's single IP for every real client; (b) `Flask-Limiter`'s `storage_uri="memory://"` keeps counters in one process's memory, so a second Gunicorn worker silently doubles every configured limit (10/min becomes ~20/min in aggregate). Gating `ProxyFix` behind an explicit env var (rather than trusting forwarded headers unconditionally) matters because *any* client can send `X-Forwarded-Proto`/`X-Forwarded-For` headers directly — trusting them by default in a config where there is no proxy in front would let a client spoof its own scheme/IP. On auth: R-002's original acceptance rationale was "network-level isolation provides access control for the current deployment model" (DL-002) — nginx sitting in front of Docker is a different but equally valid instance of that same pattern (gate at the edge, keep the app simple), so re-litigating into app-level login wasn't necessary — it just needed the gate moved from Codespaces' port-forwarding to nginx.
+
+**Consequences:** `CRANE_TRUST_PROXY=1` must be set whenever the app runs behind nginx (or any reverse proxy) — forgetting it silently reintroduces the `Secure`-flag and rate-limit-keying bugs, but degrades safely (cookie just isn't marked Secure; rate limiting still works, just keyed on the proxy's IP). Running two proxy hops (e.g. nginx behind a CDN) would need `x_for=2` etc. — not handled, since only a single nginx hop is in scope right now. Gunicorn now runs with a single worker; if throughput ever requires more, `storage_uri` must move to a shared backend (e.g. Redis) *before* adding workers back, or the rate-limiter split-brain returns. New regression test `test_forwarded_proto_ignored_without_trust_proxy` guards the fail-safe default; the opt-in path was verified manually (not by an automated test, to avoid reloading the `app` module mid-suite and destabilising shared fixture state) — confirmed the CSRF cookie gets `Secure` when `CRANE_TRUST_PROXY=1` and `X-Forwarded-Proto: https` is sent.

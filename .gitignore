@@ -9,3 +9,9 @@ uploads/
 metadata.json
 metadata.json.lock
 metadata.json.tmp
+metadata.json.migrated
+
+# R-019: SQLite metadata store (replaces metadata.json above) and its WAL sidecars.
+crane.db
+crane.db-wal
+crane.db-shm

@@ -1,8 +1,10 @@
 """End-to-end backend coverage. Exercises every mutating route through the CSRF
 guard, the file lock, the field cap, and the round-trip into the metadata store.
 """
+import io
 import json
 import os
+import sqlite3
 import threading
 import time
 
@@ -24,6 +26,15 @@ class TestCsrfAndCookies:
         assert b'Content-Security-Policy' not in r.data # CSP is a header, not body
         set_cookies = r.headers.getlist('Set-Cookie')
         assert any(h.startswith(f'{app_module.CSRF_COOKIE}=') for h in set_cookies)
+
+    def test_forwarded_proto_ignored_without_trust_proxy(self, client):
+        """R-027: unless CRANE_TRUST_PROXY=1 is set, X-Forwarded-Proto must not flip
+        request.is_secure — otherwise any client could mint a 'Secure' CSRF cookie
+        (or bypass rate-limit keying) just by sending a spoofed header directly."""
+        r = client.get('/', headers={'X-Forwarded-Proto': 'https'})
+        set_cookies = r.headers.getlist('Set-Cookie')
+        csrf_cookie = next(h for h in set_cookies if h.startswith(f'{app_module.CSRF_COOKIE}='))
+        assert '; Secure' not in csrf_cookie
 
     def test_csp_header_has_nonce_matching_inline_scripts(self, client):
         r = client.get('/')
@@ -58,8 +69,7 @@ class TestUploadEditDelete:
         assert body['success'] is True
         assert body['name'] == 'tadano_mobile_ac100_100t.pdf'
         assert os.path.exists(os.path.join(app_module.UPLOAD_FOLDER, body['name']))
-        with open(app_module.METADATA_FILE) as f:
-            stored = json.load(f)
+        stored = app_module.load_metadata()
         assert body['name'] in stored
         assert stored[body['name']]['make'] == 'Tadano'
 
@@ -84,16 +94,14 @@ class TestUploadEditDelete:
 
     def test_edit_in_place_preserves_uploaded_at(self, client, csrf):
         first = upload(client, csrf).json
-        with open(app_module.METADATA_FILE) as f:
-            uploaded_at_before = json.load(f)[first['name']]['uploaded_at']
+        uploaded_at_before = app_module.load_metadata()[first['name']]['uploaded_at']
         # Same fields → no rename, but updated_at added.
         client.put(
             f'/api/metadata/{first["name"]}',
             json={'make': 'Tadano', 'type': 'Mobile', 'model': 'AC100', 'capacity': '100t'},
             headers={'X-CSRF-Token': csrf, 'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
         )
-        with open(app_module.METADATA_FILE) as f:
-            after = json.load(f)[first['name']]
+        after = app_module.load_metadata()[first['name']]
         assert after['uploaded_at'] == uploaded_at_before
         assert 'updated_at' in after
 
@@ -105,8 +113,7 @@ class TestUploadEditDelete:
         )
         assert r.status_code == 200
         assert not os.path.exists(os.path.join(app_module.UPLOAD_FOLDER, first['name']))
-        with open(app_module.METADATA_FILE) as f:
-            assert first['name'] not in json.load(f)
+        assert first['name'] not in app_module.load_metadata()
 
 
 # ----------------------------------------------------------------------
@@ -171,23 +178,26 @@ class TestValidation:
 # ----------------------------------------------------------------------
 
 class TestMetadataPersistence:
-    def test_save_metadata_is_atomic(self, app):
+    def test_save_metadata_roundtrip(self, app):
+        """save_metadata then load_metadata returns the same data."""
+        rec = {'make': 'A', 'type': 'T', 'model': 'M', 'capacity': '1t',
+               'uploaded_at': '2026-01-01T00:00:00', 'original_filename': 'a.pdf'}
         with app.app_context():
-            app_module.save_metadata({'a.pdf': {'make': 'A'}})
-        # tmp file should be gone after replace
-        assert not os.path.exists(app_module.METADATA_FILE + '.tmp')
-        with open(app_module.METADATA_FILE) as f:
-            assert json.load(f) == {'a.pdf': {'make': 'A'}}
+            app_module.save_metadata({'a.pdf': rec})
+        stored = app_module.load_metadata()
+        assert 'a.pdf' in stored
+        assert stored['a.pdf']['make'] == 'A'
+        assert stored['a.pdf']['uploaded_at'] == '2026-01-01T00:00:00'
 
-    def test_load_metadata_recovers_from_corrupt_json(self, app):
-        with open(app_module.METADATA_FILE, 'w') as f:
-            f.write('not valid json {')
+    def test_load_metadata_recovers_from_corrupt_db(self, app):
+        """A corrupt SQLite file must not raise — it returns {} and logs a warning."""
+        with open(app_module.DB_FILE, 'wb') as f:
+            f.write(b'not a sqlite database')
         with app.app_context():
             assert app_module.load_metadata() == {}
 
-    def test_load_metadata_rejects_non_dict_shape(self, app):
-        with open(app_module.METADATA_FILE, 'w') as f:
-            f.write('[1, 2, 3]')
+    def test_load_metadata_empty_db_returns_empty_dict(self, app):
+        """A freshly initialised database (no rows) must return {}."""
         with app.app_context():
             assert app_module.load_metadata() == {}
 
@@ -214,8 +224,7 @@ class TestMetadataPersistence:
         for t in threads: t.start()
         for t in threads: t.join(timeout=10)
         assert not errors, f'worker errors: {errors}'
-        with open(app_module.METADATA_FILE) as f:
-            stored = json.load(f)
+        stored = app_module.load_metadata()
         assert len(stored) == N, f'expected {N} entries, got {len(stored)}: {list(stored)}'
 
 
@@ -236,3 +245,309 @@ class TestHelpers:
         assert app_module.allowed_file('FOO.PDF') is True
         assert app_module.allowed_file('foo.txt') is False
         assert app_module.allowed_file('foo') is False
+
+    def test_is_valid_pdf_accepts_pdf_magic(self):
+        """R-003: files starting with %PDF- pass the magic byte check."""
+        from werkzeug.datastructures import FileStorage
+        buf = io.BytesIO(b'%PDF-1.4 rest of content')
+        fs = FileStorage(stream=buf, filename='test.pdf')
+        assert app_module.is_valid_pdf(fs) is True
+        assert buf.tell() == 0  # stream rewound
+
+    def test_is_valid_pdf_rejects_non_pdf(self):
+        """R-003: files with wrong magic bytes are rejected even with .pdf extension."""
+        from werkzeug.datastructures import FileStorage
+        buf = io.BytesIO(b'<html>not a pdf</html>')
+        fs = FileStorage(stream=buf, filename='evil.pdf')
+        assert app_module.is_valid_pdf(fs) is False
+
+
+# ----------------------------------------------------------------------
+# R-003: PDF magic bytes via upload endpoint
+# ----------------------------------------------------------------------
+
+class TestPdfMagicValidation:
+    def test_upload_rejects_non_pdf_magic_with_pdf_extension(self, client, csrf):
+        """R-003: a file named .pdf but containing HTML must be rejected with 400."""
+        r = client.post(
+            '/api/upload',
+            data={
+                'file': (io.BytesIO(b'<html>not a pdf</html>'), 'sneaky.pdf'),
+                'make': 'X', 'type': 'X', 'model': 'X', 'capacity': '1t',
+            },
+            headers={'X-CSRF-Token': csrf, 'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
+            content_type='multipart/form-data',
+        )
+        assert r.status_code == 400
+        assert 'PDF' in r.json['error']
+
+
+# ----------------------------------------------------------------------
+# R-023: Health check endpoint
+# ----------------------------------------------------------------------
+
+class TestHealthEndpoint:
+    def test_health_returns_200(self, client):
+        r = client.get('/health')
+        assert r.status_code == 200
+        assert r.json['status'] == 'ok'
+        assert 'uploads' in r.json
+
+    def test_health_is_csrf_exempt(self, client):
+        """GET /health must work without CSRF cookie."""
+        r = client.get('/health')
+        assert r.status_code == 200
+
+    def test_health_reflects_upload_count(self, client, csrf):
+        r0 = client.get('/health')
+        before = r0.json['uploads']
+        upload(client, csrf)
+        r1 = client.get('/health')
+        assert r1.json['uploads'] == before + 1
+
+
+# ----------------------------------------------------------------------
+# R-025: Security headers
+# ----------------------------------------------------------------------
+
+class TestSecurityHeaders:
+    def test_x_content_type_options(self, client):
+        r = client.get('/')
+        assert r.headers.get('X-Content-Type-Options') == 'nosniff'
+
+    def test_referrer_policy(self, client):
+        r = client.get('/')
+        assert r.headers.get('Referrer-Policy') == 'strict-origin-when-cross-origin'
+
+    def test_permissions_policy(self, client):
+        r = client.get('/')
+        pp = r.headers.get('Permissions-Policy', '')
+        assert 'camera=()' in pp
+        assert 'microphone=()' in pp
+        assert 'geolocation=()' in pp
+
+
+# ----------------------------------------------------------------------
+# R-001: delete_file lock — concurrent delete cannot lose a concurrent upload
+# ----------------------------------------------------------------------
+
+class TestDeleteFileLock:
+    def test_delete_does_not_lose_concurrent_upload(self, app, client, csrf):
+        """R-001 regression: uploading N files while concurrently deleting each one
+        must not drop any surviving file's metadata due to a missing lock.
+
+        Strategy: upload N files sequentially so they all exist, then run N uploader
+        threads (each uploading a *new* file) concurrently with N deleter threads
+        (each deleting one of the pre-existing files). After all threads finish, every
+        newly uploaded file must appear in metadata.
+        """
+        N = 10
+
+        # Phase 1: pre-upload N files to be deleted later.
+        victims = []
+        for i in range(N):
+            r = upload(client, csrf, make=f'Del{i}', type_='T', model='M', capacity='1t')
+            assert r.status_code == 201, f'pre-upload {i} failed: {r.json}'
+            victims.append(r.json['name'])
+
+        # Reset rate-limit counters so the concurrent phase starts with a clean slate.
+        app_module.limiter.reset()
+
+        # Phase 2: concurrently upload N new files and delete the N victims.
+        new_names = [f'new_{i}' for i in range(N)]
+        errors = []
+
+        def do_upload(i):
+            try:
+                r = upload(client, csrf, make=f'New{i}', type_='T', model='M', capacity='2t')
+                if r.status_code != 201:
+                    errors.append(('upload', i, r.json))
+            except Exception as e:
+                errors.append(('upload_exc', i, repr(e)))
+
+        def do_delete(name):
+            try:
+                r = client.delete(
+                    f'/api/delete/{name}',
+                    headers={'X-CSRF-Token': csrf,
+                             'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
+                )
+                if r.status_code not in (200, 404):
+                    errors.append(('delete', name, r.json))
+            except Exception as e:
+                errors.append(('delete_exc', name, repr(e)))
+
+        threads = (
+            [threading.Thread(target=do_upload, args=(i,)) for i in range(N)]
+            + [threading.Thread(target=do_delete, args=(v,)) for v in victims]
+        )
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+
+        assert not errors, f'thread errors: {errors}'
+
+        # Every new upload must be present in metadata.
+        stored = app_module.load_metadata()
+
+        missing = []
+        for i in range(N):
+            expected = app_module.generate_filename(f'New{i}', 'T', 'M', '2t', '.pdf')
+            if expected not in stored:
+                missing.append(expected)
+
+        assert not missing, f'metadata lost for: {missing}'
+
+
+# ----------------------------------------------------------------------
+# R-013: Rate limiting
+# ----------------------------------------------------------------------
+
+class TestRateLimiting:
+    def test_upload_rate_limit_returns_429(self, app, client, csrf):
+        """Exceeding 10 uploads/minute from the same IP triggers a 429."""
+        app_module.limiter.reset()
+        succeeded = 0
+        hit_limit = False
+        for i in range(15):
+            r = upload(client, csrf, make=f'RL{i}', type_='T', model='M', capacity=f'{i}t')
+            if r.status_code == 201:
+                succeeded += 1
+            elif r.status_code == 429:
+                hit_limit = True
+                assert r.is_json
+                assert 'error' in r.json
+                break
+        assert hit_limit, f'expected a 429 after 10 uploads; got {succeeded} successes with no 429'
+
+
+# ----------------------------------------------------------------------
+# R-011: Cursor-based pagination
+# ----------------------------------------------------------------------
+
+class TestPagination:
+    def test_get_pdfs_returns_new_shape(self, client, csrf):
+        """R-011: GET /api/pdfs must return {items, total, next_cursor}."""
+        r = client.get('/api/pdfs')
+        assert r.status_code == 200
+        body = r.json
+        assert 'items' in body
+        assert 'total' in body
+        assert 'next_cursor' in body
+
+    def test_get_pdfs_cursor_pagination(self, client, csrf):
+        """R-011: ?after=<filename>&limit=N returns correct slice and next_cursor."""
+        # Upload 3 files so we have a= bc= cd= set to paginate over.
+        names = []
+        for i in range(3):
+            r = upload(client, csrf, make=f'Pg{i:02}', type_='T', model='M', capacity='1t')
+            assert r.status_code == 201
+            names.append(r.json['name'])
+        names.sort()
+
+        # Page 1: first 2 items. next_cursor is the last item on this page.
+        r1 = client.get('/api/pdfs?limit=2')
+        assert r1.json['total'] == 3
+        assert len(r1.json['items']) == 2
+        assert [f['name'] for f in r1.json['items']] == names[:2]
+        assert r1.json['next_cursor'] == names[1]  # last of page 1
+
+        # Page 2: send ?after=<last-of-page-1> to get items that come after it.
+        cursor = r1.json['next_cursor']
+        r2 = client.get(f'/api/pdfs?after={cursor}&limit=2')
+        assert len(r2.json['items']) == 1
+        assert r2.json['next_cursor'] is None
+        assert r2.json['items'][0]['name'] == names[2]
+
+    def test_get_pdfs_no_limit_returns_all(self, client, csrf):
+        """R-011: omitting ?limit returns all items with next_cursor=null."""
+        upload(client, csrf, make='All1', type_='T', model='M', capacity='1t')
+        upload(client, csrf, make='All2', type_='T', model='M', capacity='1t')
+        r = client.get('/api/pdfs')
+        assert r.json['next_cursor'] is None
+        assert r.json['total'] == len(r.json['items'])
+
+
+# ----------------------------------------------------------------------
+# R-021: Export endpoint
+# ----------------------------------------------------------------------
+
+class TestExportEndpoint:
+    def test_export_returns_json_attachment(self, client, csrf):
+        """R-021: GET /api/export returns application/json with a Content-Disposition attachment."""
+        upload(client, csrf)
+        r = client.get('/api/export')
+        assert r.status_code == 200
+        assert r.content_type.startswith('application/json')
+        assert 'attachment' in r.headers.get('Content-Disposition', '')
+        body = json.loads(r.data)
+        assert isinstance(body, dict)
+        assert len(body) == 1
+
+    def test_export_empty_catalogue(self, client):
+        """R-021: export on an empty catalogue returns an empty JSON object."""
+        r = client.get('/api/export')
+        assert r.status_code == 200
+        assert json.loads(r.data) == {}
+
+    def test_export_is_csrf_exempt(self, client):
+        """GET /api/export must work without a CSRF token (GET is exempt)."""
+        r = client.get('/api/export')
+        assert r.status_code == 200
+
+
+# ----------------------------------------------------------------------
+# R-020: Audit trail
+# ----------------------------------------------------------------------
+
+class TestAuditTrail:
+    def test_upload_logs_audit_event(self, app, client, csrf):
+        """R-020: a successful upload must create an 'upload' event in spec_events."""
+        r = upload(client, csrf)
+        assert r.status_code == 201
+        with sqlite3.connect(app_module.DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM spec_events WHERE event_type='upload'"
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]['filename'] == r.json['name']
+        assert rows[0]['snapshot_before'] is None
+        assert rows[0]['snapshot_after'] is not None
+
+    def test_delete_logs_audit_event(self, app, client, csrf):
+        """R-020: a successful delete must create a 'delete' event in spec_events."""
+        r = upload(client, csrf)
+        name = r.json['name']
+        client.delete(
+            f'/api/delete/{name}',
+            headers={'X-CSRF-Token': csrf, 'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
+        )
+        with sqlite3.connect(app_module.DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM spec_events WHERE event_type='delete'"
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]['filename'] == name
+        assert rows[0]['snapshot_before'] is not None
+        assert rows[0]['snapshot_after'] is None
+
+    def test_edit_logs_audit_event(self, app, client, csrf):
+        """R-020: a successful edit must create an 'edit' event in spec_events."""
+        r = upload(client, csrf)
+        name = r.json['name']
+        client.put(
+            f'/api/metadata/{name}',
+            json={'make': 'Tadano', 'type': 'Mobile', 'model': 'AC100', 'capacity': '200t'},
+            headers={'X-CSRF-Token': csrf, 'Cookie': f'{app_module.CSRF_COOKIE}={csrf}'},
+        )
+        with sqlite3.connect(app_module.DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM spec_events WHERE event_type='edit'"
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]['snapshot_before'] is not None
+        assert rows[0]['snapshot_after'] is not None
