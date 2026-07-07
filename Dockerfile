@@ -21,6 +21,11 @@ VOLUME ["/app/uploads"]
 
 EXPOSE 5000
 
+# Release version stamped in by the publish workflow (from the image tag). Surfaced
+# in the UI, at GET /version, and it seeds asset cache-busting when a file is unreadable.
+ARG CRANE_VERSION=dev
+ENV CRANE_VERSION=$CRANE_VERSION
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
 

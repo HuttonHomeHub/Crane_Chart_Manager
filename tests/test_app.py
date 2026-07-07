@@ -347,6 +347,38 @@ class TestHealthEndpoint:
 
 
 # ----------------------------------------------------------------------
+# Version + static asset cache-busting
+# ----------------------------------------------------------------------
+
+class TestVersioning:
+    def test_version_endpoint(self, client):
+        r = client.get('/version')
+        assert r.status_code == 200
+        assert r.json['version'] == app_module.APP_VERSION
+
+    def test_health_includes_version(self, client):
+        assert client.get('/health').json['version'] == app_module.APP_VERSION
+
+    def test_static_assets_are_cache_busted(self, client):
+        """The index HTML must reference main.js/main.css with a ?v= content hash so
+        a new deploy always serves fresh assets."""
+        body = client.get('/').get_data(as_text=True)
+        assert 'main.js?v=' in body
+        assert 'main.css?v=' in body
+
+    def test_asset_hash_changes_with_content(self, tmp_path, monkeypatch):
+        """The cache-bust token is a content hash — different bytes → different token."""
+        monkeypatch.setattr(app_module.app, 'static_folder', str(tmp_path))
+        app_module._ASSET_HASHES.clear()
+        (tmp_path / 'x.js').write_text('one')
+        h1 = app_module._asset_hash('x.js')
+        app_module._ASSET_HASHES.clear()
+        (tmp_path / 'x.js').write_text('two different bytes')
+        h2 = app_module._asset_hash('x.js')
+        assert h1 != h2
+
+
+# ----------------------------------------------------------------------
 # R-025: Security headers
 # ----------------------------------------------------------------------
 

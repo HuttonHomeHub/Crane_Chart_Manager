@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory, g
+from flask import Flask, render_template, request, jsonify, send_from_directory, g, url_for
 from werkzeug.exceptions import HTTPException, NotFound, RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
@@ -6,6 +6,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from pythonjsonlogger.json import JsonFormatter
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -15,6 +16,10 @@ import shutil
 import sqlite3
 import threading
 from datetime import datetime
+
+# Release version. The Docker build passes CRANE_VERSION from the image tag;
+# 'dev' locally. Shown in the UI and at GET /version, and drives asset cache-busting.
+APP_VERSION = os.environ.get('CRANE_VERSION', 'dev')
 
 app = Flask(__name__)
 
@@ -413,11 +418,30 @@ def cap_field(value, name):
 # Detect via User-Agent server-side; JS re-checks in case UA lied.
 _MAC_UA_RE = re.compile(r'mac|iphone|ipad|ipod', re.IGNORECASE)
 
+# Cache-busting: append a short content hash to static asset URLs so a new deploy
+# always serves fresh JS/CSS (no hard-refresh needed). Hash is computed once per file
+# and cached; it only changes when the file's bytes change.
+_ASSET_HASHES = {}
+
+def _asset_hash(filename):
+    if filename not in _ASSET_HASHES:
+        try:
+            with open(os.path.join(app.static_folder, filename), 'rb') as f:
+                _ASSET_HASHES[filename] = hashlib.md5(f.read()).hexdigest()[:8]
+        except OSError:
+            _ASSET_HASHES[filename] = APP_VERSION
+    return _ASSET_HASHES[filename]
+
+def versioned_static(filename):
+    return f"{url_for('static', filename=filename)}?v={_asset_hash(filename)}"
+
 @app.context_processor
 def inject_platform():
     return {
         'is_mac': bool(_MAC_UA_RE.search(request.user_agent.string or '')),
         'csp_nonce': getattr(g, 'csp_nonce', ''),
+        'app_version': APP_VERSION,
+        'versioned_static': versioned_static,
     }
 
 def allowed_file(filename):
@@ -886,7 +910,12 @@ def health():
             upload_count = conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
     except Exception:
         upload_count = -1
-    return jsonify({'status': 'ok', 'uploads': upload_count}), 200
+    return jsonify({'status': 'ok', 'uploads': upload_count, 'version': APP_VERSION}), 200
+
+@app.route("/version", methods=['GET'])
+def version():
+    """Report the running release version (matches the deployed image tag)."""
+    return jsonify({'version': APP_VERSION}), 200
 
 
 # R-019: initialise the database at import time. Tests monkeypatch DB_FILE and

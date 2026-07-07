@@ -301,3 +301,18 @@ Each entry records a decision made during the programme, the reasoning, and cons
 2. **The modal's file-picker box is a real drop target.** It looks droppable (dashed "Click to choose a PDF" zone) but the window-level dropzone refused drops while a modal was open, so nothing happened. Added `dragover`/`drop` on `#file-field` that `stopPropagation()` (so the window handler doesn't also fire) and route the file(s): single → set + prefill; multiple in upload mode → hand off to the bulk importer. The global dropzone now bails entirely while a modal is open (no overlay, no "close the dialog first" toast — which would itself have been buried behind the backdrop).
 
 **Consequences:** New `#modal-error` element + `.modal__error` style; `#file-field.is-dragover` reuses the picker's drag highlight. Two E2E tests added (`test_duplicate_upload_shows_inline_error`, `test_drop_pdf_on_picker_sets_and_prefills`). Also confirms a general rule for this codebase: **anything that must be visible while a native modal dialog is open has to live inside that dialog**, not rely on z-index. 60 backend + 14 E2E, all green. Ships as v1.3.1.
+
+---
+
+## DL-025 — Static asset cache-busting + version indicator
+
+**Date:** 2026-07-07
+**Finding:** F-007 (users had to hard-refresh after every deploy to get new JS/CSS)
+
+**Decisions:**
+1. **Content-hash cache-busting, not version-string.** `versioned_static('main.js')` appends `?v=<md5[:8]>` of the file's actual bytes. Chosen over `?v=<APP_VERSION>` because a hash busts iff the file changes — correct even if someone forgets to bump a version — and needs zero maintenance. Only the two app-owned assets (`main.js`, `main.css`) are versioned; the vendored pdf.js is stable and left alone. Hashes are computed once and cached in `_ASSET_HASHES`.
+2. **Version flows from the image tag, not a hardcoded constant.** `APP_VERSION = os.environ.get('CRANE_VERSION', 'dev')`; the Dockerfile takes `ARG CRANE_VERSION` and the publish workflow passes `steps.meta.outputs.version` (e.g. `1.3.2` for a tag, `main` for a branch build). So the version indicator always matches the deployed image with no code edit per release. Surfaced in the app-bar, `GET /version`, and `/health`.
+
+**Rationale:** Flask already does ETag revalidation, but "tab left open" and browser heuristic caching still served stale `main.js` after a deploy (the user hit exactly this). A hashed URL is a different resource, so the browser is forced to fetch it — the standard, reliable fix. Query-string busting doesn't interact with CSP (script-src matches host, not query), and the modulepreload + script `src` use the same helper so their URLs match and the preload is still used.
+
+**Consequences:** New `versioned_static()` + `_asset_hash()` helpers and context-processor exposure; `GET /version`; `.app-bar__version` label; Dockerfile `ARG/ENV CRANE_VERSION`; workflow `build-args`. 64 backend + 15 E2E, all green. Ships as v1.3.2 — **the last release that needs a manual hard-refresh; every deploy after this serves fresh assets automatically.**

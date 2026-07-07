@@ -25,13 +25,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
+    <!-- versioned_static appends a content-hash ?v= so a new deploy always serves fresh CSS/JS. -->
+    <link rel="stylesheet" href="{{ versioned_static('main.css') }}">
     <!-- Kick off PDF.js fetches in parallel with parsing/styling. The main lib goes
          into the page's module graph (modulepreload). The worker is loaded by PDF.js
          via `new Worker(url, { type: 'module' })`, which has its own module graph —
          the semantically correct hint is `preload as="fetch"` to warm the HTTP cache. -->
     <link rel="modulepreload" href="{{ url_for('static', filename='vendor/pdf.js/pdf.min.mjs') }}">
-    <link rel="modulepreload" href="{{ url_for('static', filename='main.js') }}">
+    <link rel="modulepreload" href="{{ versioned_static('main.js') }}">
     <link rel="preload" as="fetch" href="{{ url_for('static', filename='vendor/pdf.js/pdf.worker.min.mjs') }}" crossorigin>
 </head>
 <body>
@@ -84,6 +85,7 @@
         <a class="app-bar__brand" href="/">
             <svg class="icon icon--accent"><use href="#icon-construction"/></svg>
             <span>Crane Charts</span>
+            <span class="app-bar__version" title="Running version">{{ app_version }}</span>
         </a>
         <div class="app-bar__search" role="search">
             <svg class="icon icon--muted"><use href="#icon-search"/></svg>
@@ -368,6 +370,6 @@
         </div>
     </dialog>
 
-    <script type="module" src="{{ url_for('static', filename='main.js') }}"></script>
+    <script type="module" src="{{ versioned_static('main.js') }}"></script>
 </body>
 </html>

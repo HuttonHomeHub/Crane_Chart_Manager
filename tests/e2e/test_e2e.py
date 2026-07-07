@@ -145,6 +145,14 @@ class TestPageLoad:
         assert body.get('status') == 'ok'
         assert 'uploads' in body
 
+    def test_version_label_and_endpoint(self, page: Page, live_server: str):
+        """The app-bar shows a version label, and GET /version reports the same value."""
+        ver = page.request.get(f'{live_server}/version').json()['version']
+        assert ver
+        page.goto(live_server)
+        label = page.locator('.app-bar__version')
+        expect(label).to_have_text(ver)
+
 
 class TestUploadFlow:
     def test_duplicate_upload_shows_inline_error(self, page: Page, live_server: str, tmp_path):
