@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 flask --debug run              # dev server on :5000 with auto-reload
 pytest tests/                  # full suite (unit + integration; 60 tests, ~1.0s)
-pytest tests/e2e/              # Playwright E2E suite (12 tests; requires Chromium)
+pytest tests/e2e/              # Playwright E2E suite (14 tests; requires Chromium)
 pytest tests/test_app.py::TestClassName::test_name -v   # single test
 python -m playwright install chromium   # install browser once after pip install
 ```
@@ -65,7 +65,7 @@ Single-process Flask app. State is the `uploads/` directory plus `crane.db` (SQL
 
 **Errors as JSON.** The global `HTTPException` handler rewrites every 4xx/5xx into `{"error": "..."}`. Bare `except` clauses log via `app.logger.exception()` and return `{"error": "Internal server error"}` — never `str(e)`. The XHR client depends on JSON — do not return HTML error pages.
 
-**Frontend.** [static/main.js](static/main.js) is the extracted ES module. [templates/index.html](templates/index.html) loads it with the CSP nonce. The JS is divided into labelled regions: `STATE`, `API`, `TOAST`, `THEME`, `MODAL`, `METADATA MODAL`, `SHORTCUTS`, `DROPZONE`, `SIDEBAR`, `VIEWER`, `INIT`. Modals use native `<dialog>`. CSS breakpoints are CSS custom properties (`--bp-mobile`, `--bp-tablet`) read by JS via `getComputedStyle`.
+**Frontend.** [static/main.js](static/main.js) is the extracted ES module. [templates/index.html](templates/index.html) loads it with the CSP nonce. The JS is divided into labelled regions: `STATE`, `API`, `TOAST`, `THEME`, `MODAL`, `METADATA MODAL`, `SHORTCUTS`, `DROPZONE`, `SIDEBAR`, `VIEWER`, `INIT`. Modals use native `<dialog>` (`showModal()` → browser **top layer**, above all normally-positioned content). Consequence (DL-024): anything that must be visible while a dialog is open must live **inside** the dialog — a `toast` fired during a modal action renders behind the dialog's `::backdrop`. The metadata modal shows action errors inline via `#modal-error` (`showError()`), not a toast. CSS breakpoints are CSS custom properties (`--bp-mobile`, `--bp-tablet`) read by JS via `getComputedStyle`.
 
 ## Testing constraints
 

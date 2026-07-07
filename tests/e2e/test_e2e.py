@@ -147,6 +147,52 @@ class TestPageLoad:
 
 
 class TestUploadFlow:
+    def test_duplicate_upload_shows_inline_error(self, page: Page, live_server: str, tmp_path):
+        """A 409 on upload must surface INSIDE the dialog (a toast would render behind
+        the native <dialog> top-layer backdrop)."""
+        pdf_path = str(tmp_path / 'dup.pdf')
+        with open(pdf_path, 'wb') as f:
+            f.write(TINY_PDF)
+        page.goto(live_server)
+        # Seed a crane via the API.
+        result = _api_upload(page, live_server, make='Dupe', model_type='Mobile',
+                             model='DX1', capacity='50t')
+        assert result.get('success')
+
+        page.reload()
+        page.locator('#upload-trigger').click()
+        expect(page.locator('#metadata-modal')).to_be_visible(timeout=3000)
+        page.locator('#file-input').set_input_files(pdf_path)
+        page.locator('#make-input').fill('Dupe')
+        page.locator('#type-input').fill('Mobile')
+        page.locator('#model-input').fill('DX1')
+        page.locator('#capacity-input').fill('50t')
+        page.locator('#form-submit-btn').click()
+
+        # Error shows inline; the dialog stays open.
+        err = page.locator('#modal-error')
+        expect(err).to_be_visible(timeout=5000)
+        expect(err).to_contain_text('exist')
+        expect(page.locator('#metadata-modal')).to_be_visible()
+
+    def test_drop_pdf_on_picker_sets_and_prefills(self, page: Page, live_server: str):
+        """Dropping a PDF onto the modal's file-picker box selects it and prefills
+        make/model from the filename (the box looked droppable but wasn't)."""
+        page.goto(live_server)
+        page.locator('#upload-trigger').click()
+        expect(page.locator('#metadata-modal')).to_be_visible(timeout=3000)
+        page.evaluate('''() => {
+            const dt = new DataTransfer();
+            const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+            const file = new File([bytes], 'Grove GMK5150 (Load Chart).pdf', { type: 'application/pdf' });
+            dt.items.add(file);
+            document.getElementById('file-field').dispatchEvent(
+                new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+        }''')
+        expect(page.locator('#file-picker-text')).to_have_text('Grove GMK5150 (Load Chart).pdf')
+        expect(page.locator('#make-input')).to_have_value('Grove')
+        expect(page.locator('#model-input')).to_have_value('GMK5150')
+
     def test_upload_via_ui_file_picker(self, page: Page, live_server: str, tmp_path):
         """Select a PDF via the hidden file-input inside the upload modal."""
         pdf_path = str(tmp_path / 'ui_upload.pdf')

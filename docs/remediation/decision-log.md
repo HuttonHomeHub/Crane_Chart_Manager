@@ -288,3 +288,16 @@ Each entry records a decision made during the programme, the reasoning, and cons
 4. **Raise + config-drive the rate limits.** Bulk uploads would trip the old 10/min upload cap. Limits are now `app.config['UPLOAD_RATE'|'WRITE_RATE']` (default 60/min, env `CRANE_UPLOAD_RATE`/`CRANE_WRITE_RATE`), read via a callable in the `@limiter.limit` decorators so tests pin them low and the conftest resets them per-test. Safe to raise because the app is behind the tinyauth gate (RR-001). The client also retries 429s with backoff (`withRetry`) as a belt-and-braces measure.
 
 **Consequences:** `POST /api/upload` gained an optional `label` form field (carries the primary file's parenthetical). Multi-file **drop** and multi-select **picker** both route into the importer; a single file still uses the metadata modal, now filename-prefilled. New `bulkImport` module + `#bulk-modal` grid; `parseFilename()` shared with the single-upload prefill. New E2E `TestBulkImport` (3 files → 2 cranes, fill-down, Outrigger chosen as primary, verified server-side). Also fixed a latent v1.2.0 bug found along the way: `Ctrl+F` (find) also triggered the `f` fullscreen shortcut because single-key shortcuts didn't bail on a modifier chord — added `if (mod) return;`. 60 backend + 12 E2E tests, all green. Ships as v1.3.0.
+
+---
+
+## DL-024 — Dialog drop target + inline errors (native <dialog> top-layer gotchas)
+
+**Date:** 2026-07-07
+**Finding:** F-005, F-006 (UX bugs reported after v1.3.0)
+
+**Decisions:**
+1. **Errors during a modal action show inline, not as a toast.** A native `<dialog>` opened with `showModal()` renders in the browser **top layer**, above all normally-positioned content including the fixed toast stack — so a `toast.danger()` fired while the metadata modal was open appeared *behind* the dialog's `::backdrop` and was invisible. Fix: the submit handler now writes to a `#modal-error` element inside the dialog (`showError()`), cleared on open/mode-switch. Success still uses a toast (the modal closes first, so it's visible on the page). Bulk import already shows per-row errors inline, so it was unaffected.
+2. **The modal's file-picker box is a real drop target.** It looks droppable (dashed "Click to choose a PDF" zone) but the window-level dropzone refused drops while a modal was open, so nothing happened. Added `dragover`/`drop` on `#file-field` that `stopPropagation()` (so the window handler doesn't also fire) and route the file(s): single → set + prefill; multiple in upload mode → hand off to the bulk importer. The global dropzone now bails entirely while a modal is open (no overlay, no "close the dialog first" toast — which would itself have been buried behind the backdrop).
+
+**Consequences:** New `#modal-error` element + `.modal__error` style; `#file-field.is-dragover` reuses the picker's drag highlight. Two E2E tests added (`test_duplicate_upload_shows_inline_error`, `test_drop_pdf_on_picker_sets_and_prefills`). Also confirms a general rule for this codebase: **anything that must be visible while a native modal dialog is open has to live inside that dialog**, not rely on z-index. 60 backend + 14 E2E, all green. Ships as v1.3.1.

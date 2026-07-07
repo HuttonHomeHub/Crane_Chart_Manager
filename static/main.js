@@ -487,8 +487,13 @@ const metadataModal = (() => {
     }
 
     // Shared setup for every open-mode.
+    const elError = $('#modal-error');
+    function showError(msg) { elError.textContent = msg; elError.hidden = false; }
+    function clearError() { elError.textContent = ''; elError.hidden = true; }
+
     function prep(mode) {
         reset();
+        clearError();
         state.submitToken++;
         elSubmit.classList.remove('btn--loading');
         elSubmit.disabled = false;
@@ -580,6 +585,33 @@ const metadataModal = (() => {
 
     $('#file-picker').addEventListener('click', () => elFileInput.click());
 
+    // Make the file-picker box a real drop target (it looks droppable). Stops the
+    // event reaching the window-level dropzone, which refuses drops while a modal is open.
+    elFileField.addEventListener('dragover', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        elFileField.classList.add('is-dragover');
+    });
+    elFileField.addEventListener('dragleave', (e) => {
+        e.stopPropagation();
+        elFileField.classList.remove('is-dragover');
+    });
+    elFileField.addEventListener('drop', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        elFileField.classList.remove('is-dragover');
+        const files = Array.from(e.dataTransfer.files || [])
+            .filter(f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+        if (!files.length) { showError('Only PDF files can be uploaded.'); return; }
+        clearError();
+        if (files.length > 1 && elMode.value === 'upload') {
+            modal.close('metadata-modal');
+            bulkImport.open(files);
+            return;
+        }
+        setPendingFile(files[0]);
+        prefillFromName(files[0].name);
+    });
+
     function progressLabel(loaded, total) {
         const pct = total ? Math.round((loaded / total) * 100) : 0;
         elSubmit.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Saving…';
@@ -669,6 +701,7 @@ const metadataModal = (() => {
         }
 
         elSubmit.disabled = true;
+        clearError();
         // Capture mode at submit time so the finally clause can't clobber a freshly
         // re-opened modal that may have switched into a different mode meanwhile.
         const submittedMode = mode;
@@ -679,7 +712,9 @@ const metadataModal = (() => {
             else if (mode === 'editlabel') await submitEditLabel();
             else                           await submitEdit(fields);
         } catch (err) {
-            toast.danger('Action failed', err.message || String(err));
+            // Show the error INSIDE the dialog — a toast would render behind the
+            // native <dialog>'s top-layer backdrop and be invisible.
+            showError(err.message || String(err));
         } finally {
             elSubmit.disabled = false;
             // Only restore label/spinner if this submit run is still the latest one.
@@ -1033,6 +1068,9 @@ const dropzone = (() => {
     function init() {
         window.addEventListener('dragenter', (e) => {
             if (!isFileDrag(e)) return;
+            // While a modal is open, its own file-picker handles drops — don't show
+            // the full-window overlay on top of the dialog.
+            if (modal.isOpen()) return;
             counter++;
             if (counter === 1) show();
             else armWatchdog();
@@ -1055,11 +1093,9 @@ const dropzone = (() => {
             hide();
             const files = Array.from(e.dataTransfer.files || []);
             if (files.length === 0) return;
-            // A: ignore drops while a modal is open so we don't wipe an in-progress edit.
-            if (modal.isOpen()) {
-                toast.warning('Close the open dialog first', 'Then drop the PDF(s).');
-                return;
-            }
+            // While a modal is open, the dialog's own picker handles drops onto it
+            // (drops elsewhere are ignored — a toast here would sit behind the dialog).
+            if (modal.isOpen()) return;
             // Two or more files → bulk importer (grouped into cranes by filename).
             if (files.length > 1) {
                 bulkImport.open(files);
