@@ -572,6 +572,76 @@ class TestExportEndpoint:
 
 
 # ----------------------------------------------------------------------
+# RR-010: automated backups
+# ----------------------------------------------------------------------
+
+class TestBackup:
+    def test_create_backup_contains_db_and_uploads(self, app, client, csrf):
+        """A backup zip holds the crane.db snapshot and every uploaded file."""
+        import zipfile
+        crane = upload(client, csrf).json
+        path = app_module.create_backup()
+        assert os.path.exists(path)
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+        assert 'crane.db' in names
+        stored = crane['files'][0]['stored_name']
+        assert any(n == f"uploads/{crane['id']}/{stored}" for n in names)
+
+    def test_backup_snapshot_is_readable_sqlite(self, app, client, csrf):
+        """The DB inside the backup is a valid, queryable SQLite snapshot."""
+        import zipfile, tempfile
+        upload(client, csrf, make='Snap', model='SX1', capacity='9t')
+        path = app_module.create_backup()
+        with zipfile.ZipFile(path) as z:
+            data = z.read('crane.db')
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tf:
+            tf.write(data)
+            tmp = tf.name
+        try:
+            with sqlite3.connect(tmp) as conn:
+                n = conn.execute('SELECT COUNT(*) FROM cranes').fetchone()[0]
+            assert n == 1
+        finally:
+            os.remove(tmp)
+
+    def test_rotation_keeps_only_n(self, app, monkeypatch):
+        """create_backup prunes to BACKUP_KEEP newest."""
+        monkeypatch.setattr(app_module, 'BACKUP_KEEP', 2)
+        with app.app_context():
+            for _ in range(4):
+                app_module.create_backup()
+        assert len(app_module.list_backups()) == 2
+
+    def test_backup_status_endpoint(self, client, csrf):
+        r = client.get('/api/backup')
+        assert r.status_code == 200
+        for key in ('enabled', 'dir', 'interval_hours', 'keep', 'count', 'backups'):
+            assert key in r.json
+
+    def test_backup_now_creates_a_backup(self, client, csrf):
+        r = client.post('/api/backup', headers=_hdrs(csrf))
+        assert r.status_code == 201
+        assert r.json['success'] is True
+        assert r.json['name'].endswith('.zip')
+        assert client.get('/api/backup').json['count'] == 1
+
+    def test_backup_now_requires_csrf(self, client):
+        client.get('/')  # mint cookie
+        assert client.post('/api/backup').status_code == 403
+
+    def test_backup_download_streams_zip(self, client, csrf):
+        import io, zipfile
+        upload(client, csrf)
+        r = client.get('/api/backup/download')
+        assert r.status_code == 200
+        assert r.content_type == 'application/zip'
+        assert 'attachment' in r.headers.get('Content-Disposition', '')
+        with zipfile.ZipFile(io.BytesIO(r.data)) as z:
+            assert 'crane.db' in z.namelist()
+
+
+# ----------------------------------------------------------------------
 # R-020: Audit trail
 # ----------------------------------------------------------------------
 

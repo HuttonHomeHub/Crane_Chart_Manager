@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 flask --debug run              # dev server on :5000 with auto-reload
-pytest tests/                  # full suite (unit + integration; 64 tests, ~1.0s)
-pytest tests/e2e/              # Playwright E2E suite (17 tests; requires Chromium)
+pytest tests/                  # full suite (unit + integration; 71 tests, ~1.0s)
+pytest tests/e2e/              # Playwright E2E suite (18 tests; requires Chromium)
 pytest tests/test_app.py::TestClassName::test_name -v   # single test
 python -m playwright install chromium   # install browser once after pip install
 ```
@@ -62,6 +62,8 @@ Single-process Flask app. State is the `uploads/` directory plus `crane.db` (SQL
 **CSRF via double-submit cookie.** `_csrf_guard` before-request hook rejects any `POST/PUT/PATCH/DELETE` unless the `crane_csrf` cookie matches the `X-CSRF-Token` header (`secrets.compare_digest`). GETs are exempt. `_csrf_issue` after-request hook mints the cookie if absent. No `SECRET_KEY` and no Flask-WTF — deliberate. Any new mutating route inherits the guard automatically.
 
 **CSP with per-request nonce.** `_csp_nonce` before-request hook generates a nonce; `_csp_header` after-request hook writes it. `script-src` is strict (nonces only, no `unsafe-inline`/`unsafe-eval`); `style-src` retains `'unsafe-inline'` because PDF.js sets `canvas.style.width/height` per-frame. When adding inline JS, always stamp the nonce; when adding inline styles, prefer a CSS class.
+
+**Backups (RR-010).** `create_backup()` writes a timestamped `.zip` to `BACKUP_DIR` (env `CRANE_BACKUP_DIR`, default `<db dir>/backups`) containing a **consistent** `crane.db` snapshot (via SQLite's `conn.backup()` online API into a temp file — WAL-safe) plus the `uploads/` tree, then `_prune_backups()` trims to `BACKUP_KEEP`. It holds `metadata_lock()` for the DB snapshot. `_backup_scheduler()` is a daemon thread started at import by `start_backup_scheduler()` — it sleeps `min(300, interval)` then backs up every `CRANE_BACKUP_INTERVAL_HOURS`; gated by `CRANE_BACKUP_ENABLED` (both conftests set it to `0`, and monkeypatch `BACKUP_DIR`, so tests never spawn the thread or write into the repo). Routes: `GET /api/backup` (status), `POST /api/backup` (backup now), `GET /api/backup/download` (stream a fresh zip — the app-bar `#backup-btn`). `BACKUP_DIR` is a module global computed from `DB_FILE` at import, so tests that repoint `DB_FILE` must also set `BACKUP_DIR`.
 
 **Versioning & cache-busting.** `APP_VERSION` (env `CRANE_VERSION`, default `dev`) is stamped into the image at build time by `docker-publish.yml` (`build-args: CRANE_VERSION=${{ steps.meta.outputs.version }}`). It shows in the app-bar (`.app-bar__version`) and at `GET /version` (also on `/health`). Templates reference `main.js`/`main.css` via the `versioned_static()` context helper, which appends `?v=<md5[:8]>` of the file's bytes — so a new deploy always serves fresh assets with no hard-refresh. `_ASSET_HASHES` caches per file; only the two app assets are versioned (the vendored pdf.js is stable).
 

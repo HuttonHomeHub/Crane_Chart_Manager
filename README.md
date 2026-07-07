@@ -85,6 +85,31 @@ to work (the CSRF cookie's `Secure` flag and rate-limit keying depend on it).
 | `CRANE_UPLOAD_RATE` / `CRANE_WRITE_RATE` | `60 per minute` | Flask-Limiter limits for upload / other mutations |
 | `CRANE_TRUST_PROXY` | `0` | Set `1` **only** behind a single reverse-proxy hop |
 | `CRANE_VERSION` | `dev` | Release label (set from the image tag at build time) |
+| `CRANE_BACKUP_DIR` | `<data>/backups` | Where periodic backups are written |
+| `CRANE_BACKUP_INTERVAL_HOURS` | `24` | Backup interval |
+| `CRANE_BACKUP_KEEP` | `7` | How many backups to retain |
+| `CRANE_BACKUP_ENABLED` | `1` | Set `0` to disable the backup scheduler |
+
+### Backups
+
+The app writes periodic **full backups** — a consistent `crane.db` snapshot plus a zip of
+`uploads/` — to `CRANE_BACKUP_DIR`, pruned to `CRANE_BACKUP_KEEP`. The **database button** in
+the app-bar downloads one on demand. Restore by unzipping into the data directory (`crane.db`
+and `uploads/` sit at the zip root).
+
+For real safety, point `CRANE_BACKUP_DIR` at a **separate mount** (e.g. a NAS share) so a
+single-disk failure doesn't take the backups with it:
+
+```yaml
+    environment:
+      - CRANE_BACKUP_DIR=/backups
+    volumes:
+      - /apps/crane-charts/config:/config
+      - /mnt/truenas/crane-backups:/backups
+```
+
+Note: keep the *live* `crane.db` on local/block storage — SQLite's WAL locking is unreliable
+over NFS/SMB. Put the backups (write-once archives) on the network share, not the live DB.
 
 ## Develop
 

@@ -592,3 +592,13 @@ class TestSidebarUX:
         expect(page.locator('.make-item').filter(has_text='Alphacrane')).to_be_visible()
         expect(page.locator('.make-item').filter(has_text='Betacrane')).to_be_visible()
         expect(page.locator('.make-item').filter(has_text='Gammacrane')).to_be_hidden()
+
+
+class TestBackupUI:
+    def test_download_backup_button(self, page: Page, live_server: str):
+        """The app-bar backup button streams a .zip download."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Backupco', model_type='Mobile', model='BK1', capacity='10t')
+        with page.expect_download() as dl:
+            page.locator('#backup-btn').click()
+        assert dl.value.suggested_filename.endswith('.zip')

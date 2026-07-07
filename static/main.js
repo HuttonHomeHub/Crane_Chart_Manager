@@ -2191,6 +2191,17 @@ $$('[data-modal-close]').forEach(btn => {
 });
 $('#help-toggle').addEventListener('click', () => modal.open('shortcuts-modal'));
 
+// RR-010: download a full backup (crane.db + uploads) as a zip. The server builds it
+// on the fly, so reassure the user while it streams.
+$('#backup-btn').addEventListener('click', () => {
+    toast.info('Preparing backup', 'Your download will start shortly.');
+    const a = document.createElement('a');
+    a.href = '/api/backup/download';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 150);
+});
+
 /* =========================================================
    REGION: INIT
    =========================================================

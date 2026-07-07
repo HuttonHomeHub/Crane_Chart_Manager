@@ -4,6 +4,16 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.5.0 — automated backups
+- Closes the last real risk (RR-010): the app now writes periodic **full backups** — a
+  consistent `crane.db` snapshot (SQLite online-backup API) plus a zip of `uploads/` — to
+  `CRANE_BACKUP_DIR` (default `<data>/backups`) on a schedule (`CRANE_BACKUP_INTERVAL_HOURS`,
+  default 24), pruned to `CRANE_BACKUP_KEEP` (default 7). Point `CRANE_BACKUP_DIR` at a
+  separate mount (e.g. a TrueNAS share) for off-host copies. Disable with
+  `CRANE_BACKUP_ENABLED=0`.
+- **Download backup** button in the app-bar (streams a fresh zip); `GET /api/backup` (status),
+  `POST /api/backup` (backup now / host-cron hook), `GET /api/backup/download`. (DL-027)
+
 ## v1.4.3 — deterministic `:latest` (build fix)
 - No app changes. Fixed the publish pipeline: previously both the main-branch build (which
   labelled itself `latest`) and the tag build (`1.4.x`) pushed `:latest` and raced, so the

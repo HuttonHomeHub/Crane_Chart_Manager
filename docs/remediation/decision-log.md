@@ -1,7 +1,7 @@
 # Decision Log
 
 Crane Charts — living record of significant design decisions.  
-Last updated: 2026-07-07 (v1.4.0)
+Last updated: 2026-07-07 (v1.5.0)
 
 `DL-001`–`DL-020` cover the 2026-07-06 engineering remediation (see [README.md](README.md));
 `DL-021` onward cover the post-1.0 features (multi-file cranes, in-PDF find, bulk import,
@@ -352,3 +352,36 @@ made obvious; found by screenshotting the change rather than trusting the passin
 lookup. Two E2E tests (`TestSidebarUX`: collapse toggle, cross-field make search). 64 backend
 + 17 E2E, all green. Bundled with the v1.3.x documentation refresh (README/CHANGELOG/QA
 rewrite, remediation-docs consolidation). Ships as v1.4.0.
+
+---
+
+## DL-027 — Automated backups: in-app scheduler, consistent DB snapshot, separate target
+
+**Date:** 2026-07-07
+**Finding:** RR-010 (the last open risk — no recovery from `crane.db` loss)
+
+**Decisions:**
+1. **In-app scheduler, not host cron.** A daemon thread (`_backup_scheduler`) runs backups on
+   an interval, so it "just works" in the container with no external cron to configure —
+   matching the app's zero-ceremony philosophy. It sleeps `min(300, interval)` before the
+   first run so a restart still snapshots soon (and so tests, which run in seconds, never fire
+   it). `POST /api/backup` is also exposed so a host cron *can* drive it if the operator
+   prefers (set `CRANE_BACKUP_ENABLED=0`).
+2. **Consistent DB snapshot via SQLite's online-backup API**, not a file copy. Copying a live
+   WAL database can capture a torn state; `source.backup(dest)` into a temp file is
+   transactionally consistent even under concurrent writes. The `uploads/` tree is a
+   best-effort point-in-time copy (not locked — a file added mid-run may or may not be
+   included; acceptable for a catalogue snapshot). One `.zip` per backup = trivial restore
+   (unzip into the data dir).
+3. **`CRANE_BACKUP_DIR` is independent of the data dir.** Defaults to `<data>/backups` so it
+   works out of the box, but points anywhere — the intended setup is a *separate* mount (e.g.
+   a TrueNAS share) so a single-disk failure doesn't take the backups too. Documented the
+   corollary: keep the *live* DB on local/block storage, because SQLite WAL locking is
+   unreliable over NFS/SMB — put only the write-once backups on the network share.
+
+**Consequences:** `create_backup()`/`list_backups()`/`_prune_backups()`/scheduler + three
+routes + an app-bar download button. `BACKUP_DIR` is a module global derived from `DB_FILE` at
+import, so both conftests set `CRANE_BACKUP_ENABLED=0` (no thread) and monkeypatch `BACKUP_DIR`
+to a temp path. 71 backend + 18 E2E tests (7 backend backup tests incl. the snapshot being a
+valid queryable SQLite DB + rotation; 1 E2E for the download button). RR-010 → MITIGATED.
+Ships as v1.5.0.

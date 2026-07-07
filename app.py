@@ -14,7 +14,10 @@ import re
 import secrets
 import shutil
 import sqlite3
+import tempfile
 import threading
+import time
+import zipfile
 from datetime import datetime
 
 # Release version. The Docker build passes CRANE_VERSION from the image tag;
@@ -137,6 +140,19 @@ DB_FILE = os.environ.get('CRANE_DB', 'crane.db')
 ALLOWED_EXTENSIONS = {'pdf'}
 MAX_CONTENT_LENGTH = int(os.environ.get('CRANE_MAX_UPLOAD_MB', '500')) * 1024 * 1024
 MAX_FIELD_LEN = int(os.environ.get('CRANE_MAX_FIELD_LEN', '64'))
+
+# RR-010: automated backups. A backup is one .zip holding a *consistent* crane.db
+# snapshot (via SQLite's online-backup API) plus the uploads/ tree. Written on a
+# schedule to CRANE_BACKUP_DIR (default: a `backups/` dir beside the database) and
+# pruned to CRANE_BACKUP_KEEP. Point CRANE_BACKUP_DIR at a separate mount (e.g. a
+# TrueNAS share) for real off-host copies. Set CRANE_BACKUP_ENABLED=0 to disable the
+# scheduler (the download endpoint still works).
+BACKUP_DIR = os.environ.get('CRANE_BACKUP_DIR') or os.path.join(
+    os.path.dirname(os.path.abspath(DB_FILE)), 'backups')
+BACKUP_INTERVAL_HOURS = float(os.environ.get('CRANE_BACKUP_INTERVAL_HOURS', '24'))
+BACKUP_KEEP = int(os.environ.get('CRANE_BACKUP_KEEP', '7'))
+BACKUP_ENABLED = os.environ.get('CRANE_BACKUP_ENABLED', '1') != '0'
+BACKUP_PREFIX = 'crane-backup-'
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -525,6 +541,97 @@ def _audit_snapshot(crane):
     }
 
 
+# ---------------------------------------------------------------------------
+# RR-010: backups
+# ---------------------------------------------------------------------------
+
+def _write_backup_zip(zip_path):
+    """Write a full backup (consistent crane.db snapshot + uploads/) to zip_path.
+
+    The DB is copied via SQLite's online-backup API into a temp file so the snapshot
+    is transactionally consistent even while the app is writing (WAL-safe). The
+    uploads tree is a best-effort point-in-time copy (not locked, so a file added
+    mid-run may or may not be included — acceptable for a catalogue snapshot)."""
+    tmp_db = None
+    try:
+        # 1. Consistent DB snapshot.
+        fd, tmp_db = tempfile.mkstemp(suffix='.db')
+        os.close(fd)
+        with sqlite3.connect(DB_FILE) as src, sqlite3.connect(tmp_db) as dst:
+            src.backup(dst)
+        # 2. Zip the DB snapshot + every uploaded file.
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.write(tmp_db, arcname=os.path.basename(DB_FILE))
+            base = os.path.abspath(UPLOAD_FOLDER)
+            for root, _dirs, files in os.walk(base):
+                for name in files:
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, base)
+                    zf.write(full, arcname=os.path.join('uploads', rel))
+    finally:
+        if tmp_db and os.path.exists(tmp_db):
+            os.remove(tmp_db)
+    return zip_path
+
+
+def create_backup():
+    """Create a timestamped backup in BACKUP_DIR and prune to BACKUP_KEEP. Returns
+    the new backup's path. Serialised with mutations via metadata_lock()."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+    zip_path = os.path.join(BACKUP_DIR, f'{BACKUP_PREFIX}{stamp}.zip')
+    with metadata_lock():
+        _write_backup_zip(zip_path)
+    _prune_backups()
+    return zip_path
+
+
+def list_backups():
+    """Return existing backups (newest first) as [{name, size, modified}]."""
+    try:
+        entries = []
+        for name in os.listdir(BACKUP_DIR):
+            if name.startswith(BACKUP_PREFIX) and name.endswith('.zip'):
+                p = os.path.join(BACKUP_DIR, name)
+                st = os.stat(p)
+                entries.append({'name': name, 'size': st.st_size,
+                                'modified': datetime.fromtimestamp(st.st_mtime).isoformat()})
+        entries.sort(key=lambda e: e['name'], reverse=True)
+        return entries
+    except OSError:
+        return []
+
+
+def _prune_backups():
+    """Keep only the newest BACKUP_KEEP backups."""
+    backups = list_backups()
+    for old in backups[BACKUP_KEEP:]:
+        try:
+            os.remove(os.path.join(BACKUP_DIR, old['name']))
+        except OSError:
+            app.logger.warning('could not prune backup %s', old['name'])
+
+
+def _backup_scheduler():
+    """Daemon loop: after a short delay (so restarts still snapshot), back up every
+    BACKUP_INTERVAL_HOURS. Never raises out of the loop."""
+    time.sleep(min(300, BACKUP_INTERVAL_HOURS * 3600))  # initial delay
+    while True:
+        try:
+            path = create_backup()
+            app.logger.info('backup written: %s', path)
+        except Exception:
+            app.logger.exception('scheduled backup failed')
+        time.sleep(BACKUP_INTERVAL_HOURS * 3600)
+
+
+def start_backup_scheduler():
+    if not BACKUP_ENABLED:
+        return
+    t = threading.Thread(target=_backup_scheduler, name='backup-scheduler', daemon=True)
+    t.start()
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -901,6 +1008,67 @@ def export_metadata():
         app.logger.exception('export_metadata failed')
         return jsonify({'error': 'Internal server error'}), 500
 
+@app.route("/api/backup", methods=['GET'])
+def backup_status():
+    """RR-010: report the backup configuration and existing backups."""
+    try:
+        backups = list_backups()
+        return jsonify({
+            'enabled': BACKUP_ENABLED,
+            'dir': BACKUP_DIR,
+            'interval_hours': BACKUP_INTERVAL_HOURS,
+            'keep': BACKUP_KEEP,
+            'count': len(backups),
+            'latest': backups[0] if backups else None,
+            'backups': backups,
+        }), 200
+    except Exception:
+        app.logger.exception('backup_status failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route("/api/backup", methods=['POST'])
+@limiter.limit(lambda: app.config['WRITE_RATE'])
+def backup_now():
+    """RR-010: create a backup on demand (also lets a host cron drive backups when
+    the internal scheduler is disabled)."""
+    try:
+        path = create_backup()
+        st = os.stat(path)
+        return jsonify({'success': True, 'name': os.path.basename(path), 'size': st.st_size}), 201
+    except Exception:
+        app.logger.exception('backup_now failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route("/api/backup/download", methods=['GET'])
+def backup_download():
+    """RR-010: stream a freshly-built full backup (crane.db + uploads) as a .zip."""
+    try:
+        fd, tmp_zip = tempfile.mkstemp(suffix='.zip')
+        os.close(fd)
+        with metadata_lock():
+            _write_backup_zip(tmp_zip)
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+
+        def _generate():
+            try:
+                with open(tmp_zip, 'rb') as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+            finally:
+                if os.path.exists(tmp_zip):
+                    os.remove(tmp_zip)
+
+        resp = app.response_class(_generate(), mimetype='application/zip')
+        resp.headers['Content-Disposition'] = f'attachment; filename="{BACKUP_PREFIX}{stamp}.zip"'
+        resp.headers['Content-Length'] = str(os.path.getsize(tmp_zip))
+        return resp
+    except Exception:
+        app.logger.exception('backup_download failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
 @app.route("/health", methods=['GET'])
 def health():
     """R-023: liveness probe for load balancers and uptime monitors.
@@ -924,6 +1092,7 @@ def version():
 init_db()
 _migrate_from_json()   # legacy metadata.json -> specs (inert once done)
 _migrate_from_specs()  # single-file specs -> multi-file cranes/files
+start_backup_scheduler()  # RR-010: periodic full backups (no-op if CRANE_BACKUP_ENABLED=0)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

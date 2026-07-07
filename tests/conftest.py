@@ -12,6 +12,9 @@ import pytest
 # Make the parent directory importable so we can `import app`.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Don't spawn the periodic-backup thread during tests (tests call create_backup directly).
+os.environ.setdefault('CRANE_BACKUP_ENABLED', '0')
+
 import app as app_module
 
 
@@ -36,6 +39,7 @@ def app(tmp_path, monkeypatch):
 
     monkeypatch.setattr(app_module, 'UPLOAD_FOLDER', str(uploads))
     monkeypatch.setattr(app_module, 'DB_FILE', str(db))
+    monkeypatch.setattr(app_module, 'BACKUP_DIR', str(tmp_path / "backups"))
     app_module.app.config['UPLOAD_FOLDER'] = str(uploads)
 
     app_module.init_db()  # create tables in the per-test database

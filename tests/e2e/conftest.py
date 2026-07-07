@@ -14,6 +14,7 @@ import pytest
 from werkzeug.serving import make_server
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+os.environ.setdefault('CRANE_BACKUP_ENABLED', '0')  # no backup thread during E2E
 import app as app_module
 
 
@@ -34,6 +35,7 @@ def live_server(tmp_path_factory):
     # Redirect storage globals before the server starts serving requests.
     app_module.DB_FILE = db_path
     app_module.UPLOAD_FOLDER = uploads_path
+    app_module.BACKUP_DIR = os.path.join(str(base), 'backups')
     app_module.app.config['UPLOAD_FOLDER'] = uploads_path
     app_module.init_db()
 

@@ -4,9 +4,9 @@ Crane Charts — risks worth tracking.
 Last updated: 2026-07-07 (v1.3.2)
 
 Most entries below are CLOSED/MITIGATED historical records from the remediation (see
-[README.md](README.md)). The ones still live are **RR-001** (no app-level auth — depends on
-the tinyauth/nginx gate), **RR-010** (no automated `crane.db` backup), and **RR-011**
-(MITIGATED — single proxy hop / single worker).
+[README.md](README.md)). The one still genuinely live is **RR-001** (no app-level auth —
+depends on the tinyauth/nginx gate). **RR-010** (crane.db loss) is MITIGATED by automated
+backups since v1.5.0, and **RR-011** (proxy headers) is MITIGATED (single hop / single worker).
 
 ---
 
@@ -195,22 +195,16 @@ the tinyauth/nginx gate), **RR-010** (no automated `crane.db` backup), and **RR-
 | Field | Value |
 |-------|-------|
 | **ID** | RR-010 |
-| **Status** | OPEN |
+| **Status** | MITIGATED (v1.5.0) |
 | **Severity** | HIGH |
 | **Likelihood** | LOW |
 | **Impact** | HIGH |
 
-**Description:** The SQLite database (`crane.db`) stores all metadata. A corrupted or accidentally deleted file loses all metadata permanently. Unlike `metadata.json`, there is currently no cron-based backup.
+**Description:** The SQLite database (`crane.db`) stores all metadata. A corrupted or accidentally deleted file would lose all metadata permanently.
 
-**Current controls:**
-- `load_metadata()` returns `{}` on corrupt DB (graceful degradation — app continues serving PDF downloads)
-- `GET /api/export` provides a manual metadata snapshot for operator use
-- `spec_events` table provides an audit trail that can be used to reconstruct history
-- Dockerfile VOLUME mount on `/app/uploads` provides host-level persistence
+**Resolution (v1.5.0, DL-027):** The app now takes automated **full backups** — a consistent `crane.db` snapshot (SQLite online-backup API) + a zip of `uploads/` — on a schedule (`CRANE_BACKUP_INTERVAL_HOURS`, default 24h), pruned to `CRANE_BACKUP_KEEP`. Written to `CRANE_BACKUP_DIR`, which can point at a separate/off-host mount (e.g. TrueNAS). A "Download backup" button and `GET /api/backup/download` provide on-demand copies; `POST /api/backup` allows host-cron-driven backups. Graceful degradation on a corrupt DB (empty catalogue, no 500) and the `spec_events` audit trail remain as secondary controls.
 
-**Residual risk:** Automated backup is not yet in place. A `crane.db` deletion after the last manual export loses all metadata changes since that export.
-
-**Target state:** Automated daily backup cron (ops follow-up, outside the 26-item finding set). Until then, advise operators to download an export before any maintenance.
+**Residual risk:** Backups are only as safe as where `CRANE_BACKUP_DIR` points — if left at the default (`<data>/backups`, same volume as the live data), a single-disk failure loses both. Operators should point it at a separate mount. Restore is manual (unzip into the data dir); there is no in-app restore. Recommend verifying a backup occasionally.
 
 ---
 
@@ -240,4 +234,4 @@ R-017 (virtual scrolling) closed — frontend-only change (batched DOM rendering
 
 ---
 
-RR-010 remains the only OPEN risk in this register; it is an ops follow-up (automated `crane.db` backup) rather than one of the 26 tracked findings, all of which are CLOSED or ACCEPTED_RISK.
+As of v1.5.0 no risk in this register is OPEN: RR-001 is ACCEPTED (gated by tinyauth), and RR-010 / RR-011 are MITIGATED. The 26 audit findings remain CLOSED or ACCEPTED_RISK.
