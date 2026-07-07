@@ -1,154 +1,121 @@
 # Manual QA checklist
 
-Run this in a real browser after substantial changes. The pytest suite covers the
-backend; this list covers the flows that only manifest in the rendered UI.
+Run this in a real browser after substantial changes. The pytest + Playwright suites cover a
+lot; this list covers the rest of the rendered-UI flows. Time: ~8 minutes for a full pass.
 
-Time: ~5 minutes for the full pass.
-
-**Setup**: `flask --debug run`, open `http://localhost:5000/`, have a tiny PDF handy
-on the desktop for drag-drop steps.
+**Setup**: `make dev`, open `http://localhost:5000/`, have a few small PDFs handy (name a
+couple `Liebherr LTM1100 (Load Chart).pdf` / `Liebherr LTM1100 (Outrigger).pdf` to exercise
+the filename convention).
 
 ---
 
 ## 1 · First paint
-- [ ] Page loads with **dark theme** (or whichever was last persisted in `localStorage`).
-      No flash of wrong theme on reload.
-- [ ] Brand reads `Crane Charts` with the construction-crane icon in amber.
-- [ ] Sidebar populated with seeded makes; first make auto-selected; models listed.
-- [ ] No `/favicon.ico` 404 in the dev-server console (the SVG data-URL favicon is used).
-- [ ] DevTools → Network: no failed requests. `pdf.min.mjs` and `pdf.worker.min.mjs`
-      show as `(prefetch cache)` or `200`.
+- [ ] Page loads with the persisted theme (dark by default). No flash of wrong theme.
+- [ ] Brand reads `Crane Charts` with the amber crane icon and a **version badge** (e.g. `dev`).
+- [ ] DevTools → Network: `main.js`/`main.css` load with a `?v=<hash>` query; `pdf.min.mjs`
+      and `pdf.worker.min.mjs` load from `/static/vendor/…` (self-hosted, not a CDN).
 - [ ] DevTools → Console: no errors, no CSP violations.
 - [ ] DevTools → Application → Cookies: `crane_csrf` exists, `SameSite=Strict`.
 
 ## 2 · Theme toggle
-- [ ] Click the sun/moon icon — theme swaps smoothly (body bg + text transition,
-      app-bar/sidebar/viewer all fade together, no snapping).
-- [ ] Reload — theme persists.
-- [ ] On Windows / Linux the kbd chips read `Ctrl+K` / `Ctrl+U` at first paint
-      (server-side detection, no Mac-glyph flash).
+- [ ] Sun/moon icon swaps theme smoothly (bg + text transition together). Reload — persists.
+- [ ] On Windows/Linux the kbd chips read `Ctrl+K` / `Ctrl+U` at first paint (no Mac-glyph flash).
 
-## 3 · Sidebar interaction
-- [ ] Hover a make — amber muted background appears.
-- [ ] Click a make — left-edge amber stripe appears (`aria-current="true"`); models
-      below populate, grouped by type with the type header carrying an amber border-left.
-- [ ] Hover a model row — pencil + trash icons fade in on the right.
-- [ ] Hover a model name truncated by ellipsis — tooltip shows the full label.
-- [ ] Click a model — info bar populates, PDF renders.
-- [ ] Tab through the sidebar — focus rings are amber, never disappear off-screen.
+## 3 · Sidebar
+- [ ] Hover/click a make — amber active state; models populate, grouped by type.
+- [ ] A crane with more than one file shows a small **file-count badge** on its row.
+- [ ] Hover a model row — pencil + trash actions fade in. Truncated names show a tooltip.
+- [ ] Click a model — info bar + file strip populate, primary PDF renders.
+- [ ] Large catalogue: scrolling the model list keeps loading rows (virtual scroll); search
+      still finds rows that haven't scrolled into view.
 
-## 4 · Search
-- [ ] Type in the search bar — both columns filter live.
-- [ ] Type something with no matches (e.g. `xxxxxxxx`) — both columns show the banner
-      `No matches for "xxxxxxxx"`.
-- [ ] Clear the field — banner removed, full list restored.
-- [ ] `⌘/Ctrl + K` focuses and selects the search input.
+## 4 · Search (sidebar)
+- [ ] Typing filters both columns live; no-match shows the `No matches for "…"` banner;
+      clearing restores. `⌘/Ctrl+K` focuses the search input.
 
-## 5 · Upload (button path)
-- [ ] Click `Upload` in the app bar — modal opens centred; focus lands on the file
-      picker (not the X button).
-- [ ] Click the file picker — OS file dialog opens; pick a PDF; picker text becomes
-      the filename (truncated with ellipsis if very long).
-- [ ] Submit with one field empty — toast `Missing details`; focus moves to the
-      first empty input.
-- [ ] Fill all fields, submit — submit button shows `Uploading… N%`, then `Saving…`,
-      then modal closes, success toast top-right, sidebar refreshes with the new entry.
+## 5 · Upload — single file
+- [ ] Click `Upload` → modal opens, focus on the file picker.
+- [ ] **Drag a PDF onto the "Click to choose a PDF" box** — it highlights and accepts the
+      drop; make/model prefill from the filename.
+- [ ] Submit with a field empty → inline "all four fields required" warning; focus the field.
+- [ ] Fill + submit → `Uploading… N%` → modal closes → success toast → sidebar refreshes.
+- [ ] Upload a file whose make/type/model/capacity already exist → **inline error inside the
+      dialog** ("…already exists"); modal stays open (error is NOT a hidden toast behind it).
 
-## 6 · Upload (drag-drop)
-- [ ] Drag a PDF over the window — dropzone overlay shows with dashed amber card.
-- [ ] Drag a non-PDF — drop triggers a warning toast `PDF only`.
-- [ ] Drag two PDFs at once — drop triggers `Single file only`.
-- [ ] Drag a PDF onto the modal (when open) — warning toast
-      `Close the open dialog first`. Edit form is NOT wiped.
+## 6 · Upload — drag & drop
+- [ ] Drag one PDF over the window (nothing open) → dropzone overlay → drops into the upload
+      modal, prefilled from the filename.
+- [ ] With a crane open, drop one PDF → the modal offers to **add it to that crane** (titled
+      with the crane), with a "Create a new crane instead" link.
+- [ ] Drag a non-PDF → warning toast `PDF only`.
 
-## 7 · Edit
-- [ ] Click the pencil on any row — modal opens in edit mode with four fields
-      pre-filled; title reads `Edit specification`; submit button reads
-      `Save changes`; focus lands on Manufacturer.
-- [ ] Change Capacity (only), submit — toast `Saved`. Sidebar refreshes; row stays
-      in the same type group with new capacity shown.
-- [ ] Open a record, edit Type (renames the file) — toast `Saved & renamed`. Row
-      moves to a new type group. The viewer reloads with the new URL automatically.
-- [ ] Try to rename a row to match another existing record — toast
-      `A specification with these details already exists`. Modal stays open.
+## 7 · Bulk import
+- [ ] Drop **2+ PDFs** at once (or multi-select in the upload picker) → the bulk grid opens.
+- [ ] Header reads `N files → M cranes`; files sharing `Manufacturer Model` group into one
+      row (e.g. the two `Liebherr LTM1100 (...)` files → one crane, two files).
+- [ ] Manufacturer/Model/file-labels are prefilled from the filenames.
+- [ ] `Set all types` → `Apply to all` fills the Type column; fill Capacity per row.
+- [ ] A multi-file row shows a radio per file — pick which is the main one.
+- [ ] `Import` → per-row ✓ appears; on success the modal closes and the sidebar shows the new
+      cranes (the grouped one carries a file-count badge and the chosen primary).
+- [ ] Leave a row's Type/Capacity blank and Import → that row is flagged; fix and `Retry`.
 
-## 8 · Delete
-- [ ] Click trash on a row — native confirm; cancel keeps the row.
-- [ ] Confirm — toast `Specification deleted`. Focus moves to the **next** sibling
-      row in the same type group (or previous if it was the last; or another group's
-      row if the group emptied). NOT to body.
-- [ ] Delete the currently-viewed PDF — viewer drops to empty state, info bar hides.
+## 8 · Multi-file (file strip)
+- [ ] Open a crane with 2+ files → the strip shows a chip per file; the primary has the star.
+- [ ] Click a chip → that file renders in the viewer.
+- [ ] Click the star on a non-primary chip → it becomes the main file (opens by default next time).
+- [ ] Click the pencil on a chip → rename its label; the chip updates.
+- [ ] `Add file` → attach a supplementary PDF (with a label). It appears in the strip.
+- [ ] Delete a non-primary file → chip removed, crane stays. Delete the **last** file → confirm
+      dialog warns it removes the whole crane.
 
-## 9 · Viewer controls
-- [ ] `←` / `→` step pages. Buttons disable at the first/last page.
-- [ ] Type a number into the page input + Enter — jumps to that page.
-- [ ] `+ / −` zoom; readout updates in 25% steps.
-- [ ] Click the zoom readout — cycles `fit-page → fit-width → 100%`.
-- [ ] `F` enters fullscreen on the *whole page* (app bar + toolbar still visible).
-      Press `Esc` or `F` to exit.
-- [ ] Download button — file downloads with the `original_filename` if present.
-- [ ] Resize the window — PDF re-fits after a brief debounce (no jitter).
+## 9 · In-PDF find
+- [ ] `Ctrl/Cmd+F` (or `/`, or the toolbar magnifier) opens the find bar; focus in the input.
+- [ ] Type a term present in the open chart → count shows `X/Y`; matches highlight in amber;
+      the current one is outlined and scrolled into view.
+- [ ] `Enter` / `Shift+Enter` (or the arrows) step through matches; the count updates.
+- [ ] A term with no matches → `0/0`, highlights cleared. `Esc` closes the bar.
+- [ ] Switch to a different file in the strip while find is open → it re-runs on the new doc.
 
-## 10 · Keyboard shortcuts
-- [ ] `?` opens the shortcuts modal from the main UI.
-- [ ] Inside a modal, `?` *also* opens the shortcuts overlay on top.
-- [ ] Inside a modal, `←/→/+/-/F` do **not** affect the viewer behind.
-- [ ] `Esc` closes the topmost modal first; if no modal, closes the dropzone overlay;
-      if no overlay, exits fullscreen.
+## 10 · Edit & delete crane
+- [ ] Pencil on a row → edit modal, four fields prefilled. Change Capacity, save → `Saved`.
+- [ ] Edit a field that changes the slug → `Saved & renamed`; the crane's directory renames and
+      the viewer reloads with the new URLs. Colliding with an existing crane → inline error.
+- [ ] Trash on a row → confirm dialog; confirm → toast; focus moves to a sensible sibling row.
 
-## 11 · Modal behaviour
-- [ ] Click on the backdrop (outside the panel) — modal closes.
-- [ ] Mousedown inside the panel, drag onto the backdrop, release — modal does *not*
-      close (drag-out protection).
-- [ ] Mousedown on the backdrop, drag into the panel, release — modal does *not*
-      close either.
-- [ ] Tab from the last focusable inside the modal — wraps to the first. Tab never
-      escapes to the page behind.
+## 11 · Viewer controls
+- [ ] `←`/`→` page (disable at ends); page-input + Enter jumps; `+`/`−` zoom in 25% steps.
+- [ ] Zoom readout cycles `fit-page → fit-width → 100%`. `F` fullscreens the whole page;
+      `Esc`/`F` exits. **`Ctrl+F` opens find and does NOT also toggle fullscreen.**
+- [ ] Download button downloads the **currently-displayed** file (original filename).
+- [ ] Resize window → PDF re-fits after a brief debounce.
 
-## 12 · Mobile / responsive (Chrome DevTools 375×812)
-- [ ] App bar collapses: brand text hidden, search hidden, hamburger appears.
-- [ ] Tap hamburger — sidebar slides in from the left over a scrim.
-- [ ] Tab key — focus stays inside the drawer (page behind is `inert`).
-- [ ] Pick a model — drawer auto-closes, PDF renders full width.
-- [ ] Tap the search icon in the app bar — search input slides down as an overlay
-      below the bar. Tap Esc or empty the field + tap away — overlay hides.
-- [ ] Toolbar pill: `fit-width`, `fit-page`, `fullscreen` are hidden below 520 px.
-      Remaining buttons are ~40 px tall (tappable).
-- [ ] Long-press a model row — no native text-selection menu appears.
-- [ ] Pencil + trash icons are always visible on touch (no hover required).
+## 12 · Keyboard, modals, mobile, a11y
+- [ ] `?` opens shortcuts (even from inside a modal). Inside a modal, viewer keys don't leak through.
+- [ ] `Esc` closes the topmost modal, then the dropzone, then fullscreen.
+- [ ] Modal backdrop click closes; mousedown-inside-drag-out does not close.
+- [ ] Mobile (375×812): hamburger drawer over a scrim; picking a model closes it; focus stays
+      trapped; search overlay works; toolbar trims controls below 520px.
+- [ ] Tab order is logical; focus rings visible; reduced-motion disables slide animations.
 
-## 13 · Accessibility spot-check
-- [ ] Tab from the top of the page — every interactive element is reachable in
-      visual order: hamburger → brand → search → search-toggle → theme → help →
-      Upload → make items → model rows → toolbar → modal-open path.
-- [ ] All focus rings are visible (amber shadow ring around the focused control).
-- [ ] OS-level prefers-reduced-motion → toast slide and modal slide-up disable;
-      skeleton goes static at 50% opacity.
-- [ ] Toggle to high-contrast / forced-colors mode in OS — text stays legible,
-      focus rings still visible.
+## 13 · Persistence & deploy
+- [ ] Hard-refresh — cranes/files survive, metadata intact, theme applied.
+- [ ] Stop/restart the server, reload — same.
+- [ ] Corrupt `crane.db` (write garbage bytes), reload `/api/pdfs` → empty catalogue, no 500;
+      the next successful write recovers.
+- [ ] `GET /version` and the app-bar badge agree. After a code change to `main.js`, a normal
+      reload serves the new file (the `?v=` hash changed) — no hard-refresh needed.
 
-## 14 · Persistence
-- [ ] Hard-refresh (Ctrl+Shift+R) — uploaded files survive, metadata intact, theme
-      still applied.
-- [ ] Stop the server, restart, reload — same.
-- [ ] Edit `metadata.json` to invalid JSON (e.g. `garbage`), reload `/api/pdfs` —
-      sidebar shows seeded files with default names but no metadata fields. The
-      next successful save rewrites the file.
-
-## 15 · No-JS / failure modes
-- [ ] DevTools → Settings → Disable JavaScript — reload. Centered black message:
-      `Crane Charts requires JavaScript`.
-- [ ] DevTools → Network → block `pdf.min.mjs`. Reload. Viewer empty state replaced
-      with `PDF viewer failed to load` + alert-triangle icon.
-- [ ] Pull the network cable mid-upload — toast `Network error during upload`;
-      submit button restores; modal stays open.
-- [ ] Upload a 600 MB file — toast `File too large. Maximum upload size is 500 MB.`
-      (not a generic "Upload failed (413)").
+## 14 · Failure modes
+- [ ] Disable JavaScript → reload → centered `Crane Charts requires JavaScript` message.
+- [ ] Block `pdf.min.mjs` → reload → `PDF viewer failed to load` empty state.
+- [ ] Kill the network mid-upload → `Network error during upload`; modal stays open.
+- [ ] Upload a >500 MB file → `File too large. Maximum upload size is 500 MB.`
 
 ---
 
 ## Sign-off
 
-| Date       | Operator | Notes |
-|------------|----------|-------|
-|            |          |       |
+| Date | Operator | Version | Notes |
+|------|----------|---------|-------|
+|      |          |         |       |

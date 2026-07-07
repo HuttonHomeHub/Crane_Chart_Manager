@@ -1,9 +1,11 @@
 # Decision Log
 
-Programme: Crane Charts Engineering Remediation  
-Last updated: 2026-07-06 (Session 3)
+Crane Charts — living record of significant design decisions.  
+Last updated: 2026-07-07 (v1.3.2)
 
-Each entry records a decision made during the programme, the reasoning, and consequences for the backlog.
+`DL-001`–`DL-020` cover the 2026-07-06 engineering remediation (see [README.md](README.md));
+`DL-021` onward cover the post-1.0 features (multi-file cranes, in-PDF find, bulk import,
+cache-busting). Each entry records a decision, its reasoning, and consequences.
 
 ---
 

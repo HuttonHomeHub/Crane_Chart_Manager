@@ -1,0 +1,64 @@
+# Changelog
+
+All notable changes to Crane Charts. Versions are the published Docker image tags
+(`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
+[docs/remediation/decision-log.md](docs/remediation/decision-log.md).
+
+## v1.3.2 — asset cache-busting + version indicator
+- `main.js`/`main.css` URLs now carry a content-hash `?v=` (`versioned_static()`), so a new
+  deploy always serves fresh assets — **no more hard-refresh after updates** (from this
+  release on; the upgrade *to* 1.3.2 still needs one).
+- Version badge in the app-bar; `GET /version` endpoint; `version` added to `/health`.
+- `CRANE_VERSION` flows from the image tag via a Docker build-arg. (DL-025)
+
+## v1.3.1 — modal drop target + inline errors
+- The upload dialog's "Click to choose a PDF" box is now a real drop target.
+- Errors during a modal action (e.g. duplicate upload) show **inline in the dialog** instead
+  of a toast that rendered behind the native `<dialog>` top-layer backdrop. (DL-024)
+
+## v1.3.0 — bulk import
+- Drop many PDFs (or multi-select) → a grid groups them into cranes by the
+  `Manufacturer Model (Label).pdf` convention. Fill Type + Capacity ("apply to all"), pick
+  each multi-file crane's primary, import sequentially with per-row ✓/✗ and 429 retry.
+- Single-file upload now prefills make/model from the filename.
+- Upload rate limit raised to 60/min and made configurable (`CRANE_UPLOAD_RATE`/
+  `CRANE_WRITE_RATE`); `POST /api/upload` accepts an optional `label`.
+- Fixed: `Ctrl+F` (find) also toggled fullscreen. (DL-023)
+
+## v1.2.0 — editable labels, drag-to-add, in-PDF find
+- Rename a file's label from its strip chip (`PATCH /api/cranes/<id>/files/<file_id>`).
+- Dropping a PDF while a crane is open offers to add it to that crane (with a "new crane
+  instead" escape).
+- **In-PDF find**: `Ctrl/Cmd+F` or `/` searches the open document, highlights matches, and
+  navigates between them. (DL-022)
+
+## v1.1.0 — multiple files per crane
+- Broke the original 1:1 "a crane *is* its PDF" model into `cranes` (1) → `files` (N). The
+  crane slug stays the identity (`cranes.id` + the `uploads/<crane_id>/` directory);
+  `cranes.primary_file` points at the default-open file.
+- Viewer "file strip": switch files, set the main one (★), delete, add. Sidebar file-count
+  badge.
+- One-time, idempotent migration of the old single-file `specs` table into the new model on
+  first boot. (DL-021)
+
+## v1.0.1 — PUID/PGID entrypoint
+- `docker-entrypoint.sh` remaps the container user to `PUID`/`PGID` and self-heals bind-mount
+  ownership, so no host-side `chown` is needed. Added `.dockerignore`. (R-028)
+
+## v1.0.0 — engineering remediation programme
+Resolved every finding from the 2026-07-06 engineering deep-dive (see
+[docs/remediation/](docs/remediation/)). Headlines:
+- **Data & concurrency**: SQLite (`cranes`/`files`/`spec_events`) replacing the flat
+  `metadata.json`; `threading.Lock`; audit trail; cursor pagination; export endpoint.
+- **Security**: CSRF double-submit cookie, strict CSP with per-request nonce, self-hosted
+  PDF.js, rate limiting, secondary security headers, PDF magic-byte validation.
+- **Ops**: Gunicorn, Dockerfile, GitHub Actions CI + image publish, structured JSON logging,
+  health check, env-var configuration, reverse-proxy (`ProxyFix`) support.
+- **Frontend & quality**: JS extracted to `static/main.js`, accessible `<dialog>` confirms,
+  virtual-scrolled sidebar, Playwright E2E suite.
+
+---
+
+*Deployment: `docker compose pull crane-charts && docker compose up -d crane-charts`. No
+database migration is needed for any release after v1.1.0. Always keep a copy of the mounted
+`/config` directory before a major upgrade (there is no automated backup yet — see RR-010).*

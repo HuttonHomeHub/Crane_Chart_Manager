@@ -1,7 +1,12 @@
 # Risk Register
 
-Programme: Crane Charts Engineering Remediation  
-Last updated: 2026-07-06 (Session 4)
+Crane Charts — risks worth tracking.  
+Last updated: 2026-07-07 (v1.3.2)
+
+Most entries below are CLOSED/MITIGATED historical records from the remediation (see
+[README.md](README.md)). The ones still live are **RR-001** (no app-level auth — depends on
+the tinyauth/nginx gate), **RR-010** (no automated `crane.db` backup), and **RR-011**
+(MITIGATED — single proxy hop / single worker).
 
 ---
 
