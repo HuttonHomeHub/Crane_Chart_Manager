@@ -4,6 +4,11 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.4.1 — inline capacity in the model list
+- Capacity now sits on the same line as the model name (right-aligned) instead of stacked
+  below it — halves the row height and lines capacities up in a scannable column. The
+  file-count badge moves inline between the two.
+
 ## v1.4.0 — sidebar usability
 - **Wider Models column** (sidebar rebalanced to `148px 1fr`, 430px) so model names like
   `LTM1090-4.1` aren't truncated; tighter model rows so long catalogues scroll less.

@@ -695,9 +695,15 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     min-width: 0;
     cursor: pointer;
     text-align: left;   /* it's a <button>, which would otherwise centre the text */
+    /* Model name | (badge) | capacity — all on one line. */
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
 }
 
 .model-item__name {
+    flex: 1;
+    min-width: 0;
     font-size: 12.5px;
     font-weight: 600;
     color: var(--fg-primary);
@@ -708,21 +714,21 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
 }
 
 .model-item__capacity {
+    flex-shrink: 0;
     font-size: 11px;
     color: var(--fg-tertiary);
-    margin-top: 2px;
     font-variant-numeric: tabular-nums;
+    text-align: right;
 }
 
 /* Badge shown on model rows that hold more than one file. */
 .model-item__filecount {
-    display: inline-block;
-    margin-left: 6px;
+    flex-shrink: 0;
+    align-self: center;
     padding: 0 5px;
     font-size: 9.5px;
     font-weight: 700;
     line-height: 15px;
-    vertical-align: middle;
     color: var(--accent-fg);
     background: var(--accent);
     border-radius: var(--radius-pill);
