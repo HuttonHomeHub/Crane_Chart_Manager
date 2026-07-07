@@ -89,6 +89,7 @@ to work (the CSRF cookie's `Secure` flag and rate-limit keying depend on it).
 | `CRANE_BACKUP_INTERVAL_HOURS` | `24` | Backup interval |
 | `CRANE_BACKUP_KEEP` | `7` | How many backups to retain |
 | `CRANE_BACKUP_ENABLED` | `1` | Set `0` to disable the backup scheduler |
+| `CRANE_BACKUP_INCLUDE_UPLOADS` | `1` | Set `0` for DB-only backups (when PDFs live on snapshotting storage) |
 
 ### Backups
 
@@ -109,7 +110,22 @@ single-disk failure doesn't take the backups with it:
 ```
 
 Note: keep the *live* `crane.db` on local/block storage — SQLite's WAL locking is unreliable
-over NFS/SMB. Put the backups (write-once archives) on the network share, not the live DB.
+over NFS/SMB. The PDFs, being plain write-once files, are safe on a network share, so a good
+split is **DB local, `CRANE_UPLOAD_DIR` on a NAS**:
+
+```yaml
+    environment:
+      - CRANE_DB=/config/crane.db               # database → local
+      - CRANE_UPLOAD_DIR=/pdfs                   # PDFs → NAS
+      - CRANE_BACKUP_INCLUDE_UPLOADS=0           # NAS/ZFS already snapshots the PDFs
+    volumes:
+      - /apps/crane-charts/config:/config
+      - /mnt/truenas/crane-pdfs:/pdfs
+```
+
+With PDFs on storage that snapshots itself (e.g. TrueNAS/ZFS), set
+`CRANE_BACKUP_INCLUDE_UPLOADS=0` so backups are DB-only — small and fast — and rely on the
+NAS's own snapshots for the documents.
 
 ## Develop
 

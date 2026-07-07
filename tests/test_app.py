@@ -613,10 +613,21 @@ class TestBackup:
                 app_module.create_backup()
         assert len(app_module.list_backups()) == 2
 
+    def test_backup_db_only_excludes_uploads(self, app, client, csrf, monkeypatch):
+        """With CRANE_BACKUP_INCLUDE_UPLOADS=0 the zip holds crane.db but no uploads."""
+        import zipfile
+        upload(client, csrf)
+        monkeypatch.setattr(app_module, 'BACKUP_INCLUDE_UPLOADS', False)
+        path = app_module.create_backup()
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+        assert 'crane.db' in names
+        assert not any(n.startswith('uploads/') for n in names)
+
     def test_backup_status_endpoint(self, client, csrf):
         r = client.get('/api/backup')
         assert r.status_code == 200
-        for key in ('enabled', 'dir', 'interval_hours', 'keep', 'count', 'backups'):
+        for key in ('enabled', 'dir', 'interval_hours', 'keep', 'include_uploads', 'count', 'backups'):
             assert key in r.json
 
     def test_backup_now_creates_a_backup(self, client, csrf):

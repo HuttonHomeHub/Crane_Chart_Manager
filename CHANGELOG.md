@@ -12,7 +12,10 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
   separate mount (e.g. a TrueNAS share) for off-host copies. Disable with
   `CRANE_BACKUP_ENABLED=0`.
 - **Download backup** button in the app-bar (streams a fresh zip); `GET /api/backup` (status),
-  `POST /api/backup` (backup now / host-cron hook), `GET /api/backup/download`. (DL-027)
+  `POST /api/backup` (backup now / host-cron hook), `GET /api/backup/download`.
+- `CRANE_BACKUP_INCLUDE_UPLOADS=0` makes backups **DB-only** — for when the PDFs
+  (`CRANE_UPLOAD_DIR`) live on storage that snapshots itself (e.g. TrueNAS/ZFS), so re-zipping
+  them each run would be redundant. (DL-027)
 
 ## v1.4.3 — deterministic `:latest` (build fix)
 - No app changes. Fixed the publish pipeline: previously both the main-branch build (which

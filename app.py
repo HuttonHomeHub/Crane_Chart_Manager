@@ -152,6 +152,9 @@ BACKUP_DIR = os.environ.get('CRANE_BACKUP_DIR') or os.path.join(
 BACKUP_INTERVAL_HOURS = float(os.environ.get('CRANE_BACKUP_INTERVAL_HOURS', '24'))
 BACKUP_KEEP = int(os.environ.get('CRANE_BACKUP_KEEP', '7'))
 BACKUP_ENABLED = os.environ.get('CRANE_BACKUP_ENABLED', '1') != '0'
+# Set to 0 for DB-only backups — e.g. when uploads/ lives on storage that already
+# snapshots (a TrueNAS/ZFS share), so zipping the PDFs into every backup is redundant.
+BACKUP_INCLUDE_UPLOADS = os.environ.get('CRANE_BACKUP_INCLUDE_UPLOADS', '1') != '0'
 BACKUP_PREFIX = 'crane-backup-'
 
 if not os.path.exists(UPLOAD_FOLDER):
@@ -559,15 +562,17 @@ def _write_backup_zip(zip_path):
         os.close(fd)
         with sqlite3.connect(DB_FILE) as src, sqlite3.connect(tmp_db) as dst:
             src.backup(dst)
-        # 2. Zip the DB snapshot + every uploaded file.
+        # 2. Zip the DB snapshot, plus every uploaded file unless uploads are excluded
+        #    (BACKUP_INCLUDE_UPLOADS=0 — e.g. PDFs live on a snapshotting NAS share).
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.write(tmp_db, arcname=os.path.basename(DB_FILE))
-            base = os.path.abspath(UPLOAD_FOLDER)
-            for root, _dirs, files in os.walk(base):
-                for name in files:
-                    full = os.path.join(root, name)
-                    rel = os.path.relpath(full, base)
-                    zf.write(full, arcname=os.path.join('uploads', rel))
+            if BACKUP_INCLUDE_UPLOADS:
+                base = os.path.abspath(UPLOAD_FOLDER)
+                for root, _dirs, files in os.walk(base):
+                    for name in files:
+                        full = os.path.join(root, name)
+                        rel = os.path.relpath(full, base)
+                        zf.write(full, arcname=os.path.join('uploads', rel))
     finally:
         if tmp_db and os.path.exists(tmp_db):
             os.remove(tmp_db)
@@ -1018,6 +1023,7 @@ def backup_status():
             'dir': BACKUP_DIR,
             'interval_hours': BACKUP_INTERVAL_HOURS,
             'keep': BACKUP_KEEP,
+            'include_uploads': BACKUP_INCLUDE_UPLOADS,
             'count': len(backups),
             'latest': backups[0] if backups else None,
             'backups': backups,

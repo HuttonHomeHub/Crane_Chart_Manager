@@ -377,7 +377,15 @@ rewrite, remediation-docs consolidation). Ships as v1.4.0.
    works out of the box, but points anywhere — the intended setup is a *separate* mount (e.g.
    a TrueNAS share) so a single-disk failure doesn't take the backups too. Documented the
    corollary: keep the *live* DB on local/block storage, because SQLite WAL locking is
-   unreliable over NFS/SMB — put only the write-once backups on the network share.
+   unreliable over NFS/SMB — put only the write-once backups (and the plain PDF files, which
+   are lock-free) on the network share.
+4. **`CRANE_BACKUP_INCLUDE_UPLOADS` (default on) for DB-only backups.** `CRANE_DB` and
+   `CRANE_UPLOAD_DIR` are already independent, so the natural homelab split is DB-local +
+   PDFs-on-NAS. When the PDFs sit on storage that snapshots itself (TrueNAS/ZFS), re-zipping
+   gigabytes of PDFs into every backup is redundant and slow over the mount — so this toggle
+   lets backups be just the (small, lock-sensitive, most-critical) DB snapshot, leaning on the
+   NAS's own snapshots for the documents. Full backup remains the default (self-contained
+   restore artifact).
 
 **Consequences:** `create_backup()`/`list_backups()`/`_prune_backups()`/scheduler + three
 routes + an app-bar download button. `BACKUP_DIR` is a module global derived from `DB_FILE` at
