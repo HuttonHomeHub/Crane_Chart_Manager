@@ -4,6 +4,13 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.4.3 — deterministic `:latest` (build fix)
+- No app changes. Fixed the publish pipeline: previously both the main-branch build (which
+  labelled itself `latest`) and the tag build (`1.4.x`) pushed `:latest` and raced, so the
+  version badge on `:latest` flip-flopped between the real version and the word "latest".
+  Images are now published **only on version tags**, so `:latest` is always the latest
+  release and carries its real version. (CI still runs on every main push.)
+
 ## v1.4.2 — capacity placement + tooltip removal
 - Capacity now sits **right after the model name** (`LTM1050-3.1 · 50t`, muted) instead of
   right-aligned by the edit buttons, which read as an awkward gap.

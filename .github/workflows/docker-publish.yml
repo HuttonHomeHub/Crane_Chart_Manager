@@ -1,8 +1,12 @@
 name: Docker publish
 
+# Publish images only on version tags. A main-branch build would also push `:latest`
+# (with CRANE_VERSION="latest") and race the tag build for that tag — leaving `:latest`
+# nondeterministically labelled. Tags are the releases, so the tag build is the sole
+# publisher of `X.Y.Z` / `X.Y` / `latest`, all carrying the real version. (CI still runs
+# on main via ci.yml.)
 on:
   push:
-    branches: [main]
     tags: ["v*.*.*"]
 
 permissions:
