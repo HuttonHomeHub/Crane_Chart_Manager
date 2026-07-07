@@ -702,7 +702,9 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
 }
 
 .model-item__name {
-    flex: 1;
+    /* Size to content so the capacity sits right after the name (not pushed to the far
+       right); shrink + truncate only when the name is too long for the row. */
+    flex: 0 1 auto;
     min-width: 0;
     font-size: 12.5px;
     font-weight: 600;
@@ -718,7 +720,12 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     font-size: 11px;
     color: var(--fg-tertiary);
     font-variant-numeric: tabular-nums;
-    text-align: right;
+    white-space: nowrap;
+}
+.model-item__capacity::before {
+    content: "·";
+    margin-right: 6px;
+    opacity: 0.5;
 }
 
 /* Badge shown on model rows that hold more than one file. */

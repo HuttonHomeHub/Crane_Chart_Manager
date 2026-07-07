@@ -4,6 +4,12 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.4.2 — capacity placement + tooltip removal
+- Capacity now sits **right after the model name** (`LTM1050-3.1 · 50t`, muted) instead of
+  right-aligned by the edit buttons, which read as an awkward gap.
+- Removed the model-row hover tooltip — with the name and capacity both on the row it only
+  repeated what was already visible.
+
 ## v1.4.1 — inline capacity in the model list
 - Capacity now sits on the same line as the model name (right-aligned) instead of stacked
   below it — halves the row height and lines capacities up in a scannable column. The

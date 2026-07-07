@@ -1350,17 +1350,10 @@ const sidebar = {
         body.type = 'button';
         body.className = 'model-item__body';
         body.setAttribute('aria-current', 'false');
-        // D (round 9): full label tooltip so a truncated model name is still readable.
-        body.title = (file.model || 'Unknown') + (file.capacity ? ` · ${file.capacity}` : '');
-        // Single line: model name (truncates) on the left, capacity right-aligned so
-        // capacities line up in a scannable column.
-        body.innerHTML = `
-            <span class="model-item__name"></span>
-            <span class="model-item__capacity"></span>
-        `;
+        // Single line: model name, then its capacity right after it (muted).
+        body.innerHTML = `<span class="model-item__name"></span>`;
         body.querySelector('.model-item__name').textContent = file.model || 'Unknown';
-        body.querySelector('.model-item__capacity').textContent = file.capacity || '—';
-        // Badge cranes that hold more than one document (between the name and capacity).
+        // Badge cranes that hold more than one document (right after the name).
         const fileCount = file.file_count || 1;
         if (fileCount > 1) {
             const badge = document.createElement('span');
@@ -1368,7 +1361,13 @@ const sidebar = {
             badge.textContent = String(fileCount);
             badge.title = `${fileCount} files`;
             badge.setAttribute('aria-label', `${fileCount} files`);
-            body.insertBefore(badge, body.querySelector('.model-item__capacity'));
+            body.appendChild(badge);
+        }
+        if (file.capacity) {
+            const cap = document.createElement('span');
+            cap.className = 'model-item__capacity';
+            cap.textContent = file.capacity;
+            body.appendChild(cap);
         }
         body.addEventListener('click', () => {
             // R-016: use BP_TABLET from CSS custom property
