@@ -266,7 +266,7 @@
                             <span class="file-picker__primary" id="file-picker-text">Click to choose a PDF</span>
                             <span class="file-picker__secondary" id="file-picker-hint">PDF only · 500 MB max · or drop one anywhere on the page</span>
                         </button>
-                        <input id="file-input" type="file" accept="application/pdf,.pdf" hidden>
+                        <input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden>
                     </div>
                     <div class="form-grid" id="metadata-grid">
                         <div class="form-field">
@@ -297,6 +297,34 @@
                     <button type="submit" class="btn btn--primary" id="form-submit-btn">Upload</button>
                 </footer>
             </form>
+        </div>
+    </dialog>
+
+    <!-- Bulk import: drop/select many PDFs, grouped into cranes by filename convention. -->
+    <dialog class="modal" id="bulk-modal" aria-labelledby="bulk-title">
+        <div class="modal__panel modal__panel--lg">
+            <header class="modal__header">
+                <h2 id="bulk-title">Import files</h2>
+                <button class="modal__close" data-modal-close="bulk-modal" aria-label="Close dialog">
+                    <svg class="icon"><use href="#icon-x"/></svg>
+                </button>
+            </header>
+            <div class="bulk__toolbar">
+                <span class="bulk__summary" id="bulk-summary"></span>
+                <div class="bulk__fill">
+                    <label for="bulk-fill-type">Set all types</label>
+                    <input id="bulk-fill-type" type="text" placeholder="Mobile, Crawler…" autocomplete="off">
+                    <button type="button" class="btn btn--ghost btn--sm" id="bulk-fill-type-apply">Apply to all</button>
+                </div>
+            </div>
+            <div class="modal__body bulk__body">
+                <div class="bulk__grid" id="bulk-grid"></div>
+            </div>
+            <footer class="modal__footer">
+                <span class="bulk__progress" id="bulk-progress" aria-live="polite"></span>
+                <button type="button" class="btn btn--ghost" data-modal-close="bulk-modal">Cancel</button>
+                <button type="button" class="btn btn--primary" id="bulk-submit">Import</button>
+            </footer>
         </div>
     </dialog>
 

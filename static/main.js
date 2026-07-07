@@ -34,6 +34,20 @@ function csrfToken() {
     const match = document.cookie.match(/(?:^|; )crane_csrf=([^;]+)/);
     return match ? decodeURIComponent(match[1]) : '';
 }
+
+// Parse the house filename convention "Manufacturer Model (Label).pdf" into parts.
+// The parenthetical (a file's label) is optional; make is the first word, model the
+// rest of the base name. Used by the bulk importer and single-file prefill.
+function parseFilename(name) {
+    let base = String(name || '').replace(/\.pdf$/i, '').trim();
+    let label = '';
+    const m = base.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+    if (m) { base = m[1].trim(); label = m[2].trim(); }
+    const parts = base.split(/\s+/).filter(Boolean);
+    const make = parts.shift() || '';
+    const model = parts.join(' ');
+    return { make, model, label };
+}
 const isMac = (() => {
     const uaData = navigator.userAgentData;
     if (uaData && typeof uaData.platform === 'string') {
@@ -126,7 +140,7 @@ const api = {
         }
         return all;
     },
-    upload(file, fields, onProgress) {
+    upload(file, fields, onProgress, label) {
         // XHR (not fetch) so we can show real upload progress.
         return new Promise((resolve, reject) => {
             const fd = new FormData();
@@ -135,6 +149,7 @@ const api = {
             fd.append('type', fields.type);
             fd.append('model', fields.model);
             fd.append('capacity', fields.capacity);
+            if (label) fd.append('label', label);
             const xhr = new XMLHttpRequest();
             xhr.open('POST', '/api/upload');
             xhr.setRequestHeader('X-CSRF-Token', csrfToken());
@@ -489,10 +504,19 @@ const metadataModal = (() => {
         elFileField.hidden = false;
         elGrid.hidden = false;
         elLabelField.hidden = true;
-        if (file) setPendingFile(file);
+        if (file) { setPendingFile(file); prefillFromName(file.name); }
         // If a file is already chosen (drag-drop path), start on Manufacturer;
         // otherwise start on the file picker so keyboard users land there first.
         modal.open('metadata-modal', { focus: file ? '#make-input' : '#file-picker' });
+    }
+
+    // Prefill Manufacturer/Model from the "Manufacturer Model (…).pdf" convention,
+    // only in upload mode and only into empty fields (never clobber typed values).
+    function prefillFromName(name) {
+        if (elMode.value !== 'upload') return;
+        const { make, model } = parseFilename(name);
+        if (make && !elMake.value.trim()) elMake.value = make;
+        if (model && !elModel.value.trim()) elModel.value = model;
     }
 
     function openEdit(record) {
@@ -542,8 +566,16 @@ const metadataModal = (() => {
     }
 
     elFileInput.addEventListener('change', (e) => {
-        const f = e.target.files && e.target.files[0];
-        if (f) setPendingFile(f);
+        const fs = e.target.files;
+        if (!fs || !fs.length) return;
+        // Multi-select in upload mode → hand off to the bulk importer.
+        if (fs.length > 1 && elMode.value === 'upload') {
+            modal.close('metadata-modal');
+            bulkImport.open(fs);
+            return;
+        }
+        setPendingFile(fs[0]);
+        prefillFromName(fs[0].name);
     });
 
     $('#file-picker').addEventListener('click', () => elFileInput.click());
@@ -665,6 +697,244 @@ const metadataModal = (() => {
 })();
 
 /* =========================================================
+   REGION: BULK IMPORT
+   ========================================================= */
+// Drop or select many PDFs → group them into cranes by the "Manufacturer Model
+// (Label).pdf" convention, let the user fill Type + Capacity (and pick the main
+// file where a crane has several), then upload each crane sequentially.
+const bulkImport = (() => {
+    const elGrid     = $('#bulk-grid');
+    const elSummary  = $('#bulk-summary');
+    const elProgress = $('#bulk-progress');
+    const elSubmit   = $('#bulk-submit');
+    const elFillType = $('#bulk-fill-type');
+
+    let drafts = [];
+    let running = false;
+
+    function open(fileList) {
+        const files = Array.from(fileList).filter(
+            f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+        if (!files.length) { toast.warning('No PDFs', 'Only PDF files can be imported.'); return; }
+        drafts = buildDrafts(files);
+        render();
+        elSubmit.disabled = false;
+        elSubmit.textContent = 'Import';
+        elProgress.textContent = '';
+        elFillType.value = '';
+        modal.open('bulk-modal', { focus: '#bulk-fill-type' });
+    }
+
+    // Group files by parsed (make, model) — a crane's several files share those.
+    function buildDrafts(files) {
+        const groups = new Map();
+        for (const file of files) {
+            const { make, model, label } = parseFilename(file.name);
+            const key = (make + '|' + model).toLowerCase();
+            if (!groups.has(key)) {
+                groups.set(key, { make, model, type: '', capacity: '',
+                                  files: [], primaryIdx: 0, status: 'pending', error: '' });
+            }
+            groups.get(key).files.push({ file, label, name: file.name });
+        }
+        return Array.from(groups.values());
+    }
+
+    function render() {
+        elGrid.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'bulk__row bulk__row--head';
+        for (const h of ['Manufacturer', 'Model', 'Type', 'Capacity', 'Files', '']) {
+            const c = document.createElement('div');
+            c.textContent = h;
+            head.appendChild(c);
+        }
+        elGrid.appendChild(head);
+
+        drafts.forEach((d, i) => {
+            const row = document.createElement('div');
+            row.className = 'bulk__row';
+            d.el = row;
+            d.inputs = {};
+            ['make', 'model', 'type', 'capacity'].forEach((field) => {
+                row.appendChild(cellInput(d, field));
+            });
+            row.appendChild(filesCell(d, i));
+            const status = document.createElement('div');
+            status.className = 'bulk__status';
+            d.statusEl = status;
+            row.appendChild(status);
+            elGrid.appendChild(row);
+        });
+        updateSummary();
+    }
+
+    const PLACEHOLDER = { make: 'Liebherr', model: 'LTM1100', type: 'Mobile', capacity: '100t' };
+
+    function cellInput(d, field) {
+        const wrap = document.createElement('div');
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'bulk__input';
+        inp.value = d[field] || '';
+        inp.placeholder = PLACEHOLDER[field];
+        inp.setAttribute('aria-label', field);
+        inp.addEventListener('input', () => { d[field] = inp.value; clearRowError(d); });
+        d.inputs[field] = inp;
+        wrap.appendChild(inp);
+        return wrap;
+    }
+
+    function filesCell(d, rowIdx) {
+        const wrap = document.createElement('div');
+        wrap.className = 'bulk__files';
+        d.files.forEach((f, idx) => {
+            const chip = document.createElement('label');
+            chip.className = 'bulk__file';
+            if (d.files.length > 1) {
+                const radio = document.createElement('input');
+                radio.type = 'radio';
+                radio.name = 'bulk-primary-' + rowIdx;
+                radio.checked = idx === d.primaryIdx;
+                radio.title = 'Make this the main file';
+                radio.addEventListener('change', () => { d.primaryIdx = idx; });
+                chip.appendChild(radio);
+            }
+            const span = document.createElement('span');
+            span.className = 'bulk__file-label';
+            span.textContent = f.label || f.name;
+            span.title = f.name;
+            chip.appendChild(span);
+            wrap.appendChild(chip);
+        });
+        return wrap;
+    }
+
+    function updateSummary() {
+        const nf = drafts.reduce((s, d) => s + d.files.length, 0);
+        elSummary.textContent =
+            `${nf} file${nf !== 1 ? 's' : ''} → ${drafts.length} crane${drafts.length !== 1 ? 's' : ''}`;
+    }
+
+    function clearRowError(d) {
+        if (d.status === 'error') { d.status = 'pending'; d.error = ''; paintStatus(d); }
+        if (d.el) d.el.classList.remove('is-invalid');
+    }
+
+    function paintStatus(d) {
+        const s = d.statusEl;
+        if (!s) return;
+        s.className = 'bulk__status bulk__status--' + d.status;
+        s.title = d.error || '';
+        if (d.status === 'done')          s.innerHTML = '<svg class="icon"><use href="#icon-check-circle-2"/></svg>';
+        else if (d.status === 'error')    s.innerHTML = '<svg class="icon"><use href="#icon-alert-circle"/></svg>';
+        else if (d.status === 'uploading') s.textContent = '…';
+        else                              s.textContent = '';
+    }
+
+    function validate() {
+        let ok = true;
+        const seen = new Set();
+        for (const d of drafts) {
+            if (d.status === 'done') continue;
+            d.el.classList.remove('is-invalid');
+            const missing = !d.make.trim() || !d.model.trim() || !d.type.trim() || !d.capacity.trim();
+            const slug = [d.make, d.type, d.model, d.capacity].join('|').trim().toLowerCase();
+            const dup = !missing && seen.has(slug);
+            if (!missing) seen.add(slug);
+            if (missing || dup) {
+                ok = false;
+                d.el.classList.add('is-invalid');
+                d.status = 'error';
+                d.error = missing ? 'Fill in all four fields' : 'Duplicate of another row';
+                paintStatus(d);
+            }
+        }
+        return ok;
+    }
+
+    // The bulk loop can outrun the upload rate limit; retry a 429 with backoff.
+    async function withRetry(fn) {
+        for (let attempt = 0; ; attempt++) {
+            try { return await fn(); }
+            catch (err) {
+                if (/\(429\)|too many/i.test(err.message || '') && attempt < 5) {
+                    await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+                    continue;
+                }
+                throw err;
+            }
+        }
+    }
+
+    async function submit() {
+        if (running) return;
+        if (!validate()) { toast.warning('Some rows need attention', 'Fix the highlighted rows first.'); return; }
+        running = true;
+        elSubmit.disabled = true;
+
+        const pending = drafts.filter(d => d.status !== 'done');
+        let done = 0, failed = 0;
+        for (const d of drafts) {
+            if (d.status === 'done') continue;
+            d.status = 'uploading'; paintStatus(d);
+            elProgress.textContent = `Importing… ${done + failed}/${pending.length}`;
+            try {
+                const primary = d.files[d.primaryIdx];
+                const rest = d.files.filter((_, i) => i !== d.primaryIdx);
+                const crane = await withRetry(() => api.upload(
+                    primary.file,
+                    { make: d.make.trim(), type: d.type.trim(), model: d.model.trim(), capacity: d.capacity.trim() },
+                    null, primary.label));
+                for (const extra of rest) {
+                    await withRetry(() => api.addFile(crane.id, extra.file, extra.label));
+                }
+                d.status = 'done'; paintStatus(d);
+                Object.values(d.inputs).forEach(i => { i.disabled = true; });
+                done++;
+            } catch (err) {
+                d.status = 'error';
+                d.error = err.message || String(err);
+                d.el.classList.add('is-invalid');
+                paintStatus(d);
+                failed++;
+            }
+            elProgress.textContent = `Importing… ${done + failed}/${pending.length}`;
+        }
+
+        running = false;
+        elSubmit.disabled = false;
+        await sidebar.loadFileList();
+
+        if (failed === 0) {
+            toast.success(`Imported ${done} crane${done !== 1 ? 's' : ''}`);
+            modal.close('bulk-modal');
+        } else {
+            elSubmit.textContent = 'Retry failed';
+            elProgress.textContent = `${done} imported · ${failed} failed — fix and retry`;
+            toast.warning('Some imports failed', `${failed} row(s) need attention.`);
+        }
+    }
+
+    $('#bulk-fill-type-apply').addEventListener('click', () => {
+        const v = elFillType.value.trim();
+        if (!v) return;
+        drafts.forEach(d => {
+            if (d.status === 'done') return;
+            d.type = v;
+            if (d.inputs && d.inputs.type) d.inputs.type.value = v;
+            clearRowError(d);
+        });
+    });
+    elFillType.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); $('#bulk-fill-type-apply').click(); }
+    });
+    elSubmit.addEventListener('click', () => submit());
+
+    return { open };
+})();
+
+/* =========================================================
    REGION: SHORTCUTS
    ========================================================= */
 const shortcuts = {
@@ -714,6 +984,9 @@ const shortcuts = {
         // every other viewer-affecting shortcut is suppressed while a modal owns focus.
         if (e.key === '?') { e.preventDefault(); modal.open('shortcuts-modal'); return; }
         if (modal.isOpen()) return;
+        // Single-key shortcuts must not fire on a modifier chord — otherwise Ctrl+F
+        // (in-PDF find) would also toggle fullscreen via the 'f' case below.
+        if (mod) return;
 
         switch (e.key) {
             case 'ArrowLeft':  if (state.pdfDoc) { e.preventDefault(); viewer.prev(); } break;
@@ -782,8 +1055,14 @@ const dropzone = (() => {
             hide();
             const files = Array.from(e.dataTransfer.files || []);
             if (files.length === 0) return;
+            // A: ignore drops while a modal is open so we don't wipe an in-progress edit.
+            if (modal.isOpen()) {
+                toast.warning('Close the open dialog first', 'Then drop the PDF(s).');
+                return;
+            }
+            // Two or more files → bulk importer (grouped into cranes by filename).
             if (files.length > 1) {
-                toast.warning('Single file only', 'Drop one PDF at a time.');
+                bulkImport.open(files);
                 return;
             }
             const file = files[0];
@@ -791,14 +1070,8 @@ const dropzone = (() => {
                 toast.warning('PDF only', 'Only PDF files can be uploaded.');
                 return;
             }
-            // A: ignore drops while a modal is open so we don't wipe an in-progress edit.
-            if (modal.isOpen()) {
-                toast.warning('Close the open dialog first', 'Then drop the PDF to start a new upload.');
-                return;
-            }
-            // If a crane is open, assume the drop is a supplementary file for it
-            // (the modal names the crane and offers "new crane instead"). Otherwise
-            // it's a brand-new crane.
+            // Single file: if a crane is open, offer it as a supplementary file for that
+            // crane (the modal names it and offers "new crane instead"); otherwise a new crane.
             if (state.current) metadataModal.openAddFile(state.current, file);
             else metadataModal.openUpload(file);
         });

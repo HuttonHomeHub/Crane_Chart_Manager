@@ -455,3 +455,50 @@ class TestFind:
         page.locator('#find-input').fill('zzzznotfound')
         expect(page.locator('#find-count')).to_have_text('0/0', timeout=5000)
         expect(page.locator('.pdf-highlight')).to_have_count(0)
+
+
+class TestBulkImport:
+    def test_bulk_import_groups_and_creates_cranes(self, page: Page, live_server: str):
+        """Select several PDFs → grouped into cranes by 'Manufacturer Model (Label)',
+        fill Type/Capacity, pick a primary, submit → grouped cranes created."""
+        page.goto(live_server)
+        # Multi-select on the upload modal's picker routes to the bulk importer.
+        page.locator('#upload-trigger').click()
+        expect(page.locator('#metadata-modal')).to_be_visible(timeout=3000)
+        page.locator('#file-input').set_input_files([
+            {"name": "Liebherr LTM1100 (Load Chart).pdf", "mimeType": "application/pdf", "buffer": TINY_PDF},
+            {"name": "Liebherr LTM1100 (Outrigger).pdf", "mimeType": "application/pdf", "buffer": TINY_PDF},
+            {"name": "Tadano AC100 (Load Chart).pdf", "mimeType": "application/pdf", "buffer": TINY_PDF},
+        ])
+
+        expect(page.locator('#bulk-modal')).to_be_visible(timeout=3000)
+        # 3 files, but the two Liebherr files group into one crane → 2 cranes.
+        expect(page.locator('#bulk-summary')).to_contain_text('3 files')
+        expect(page.locator('#bulk-summary')).to_contain_text('2 cranes')
+        rows = page.locator('.bulk__row:not(.bulk__row--head)')
+        expect(rows).to_have_count(2)
+
+        # Make/Model came from the filenames.
+        expect(page.locator('.bulk__input[aria-label="make"]').first).to_have_value('Liebherr')
+
+        # Fill Type for all rows at once, Capacity per row.
+        page.locator('#bulk-fill-type').fill('Mobile')
+        page.locator('#bulk-fill-type-apply').click()
+        for cap in page.locator('.bulk__row:not(.bulk__row--head) input[aria-label="capacity"]').all():
+            cap.fill('100t')
+
+        # On the Liebherr crane, choose the Outrigger file as the main one.
+        liebherr = page.locator('.bulk__row').filter(has_text='Outrigger')
+        liebherr.locator('.bulk__file').filter(has_text='Outrigger').locator('input[type=radio]').check()
+
+        page.locator('#bulk-submit').click()
+        expect(page.locator('#bulk-modal')).not_to_be_visible(timeout=10000)
+
+        # Verify server-side: two cranes, Liebherr has 2 files with Outrigger primary.
+        by_id = {c['id']: c for c in page.request.get(f'{live_server}/api/pdfs').json()['items']}
+        assert 'liebherr_mobile_ltm1100_100t' in by_id
+        assert 'tadano_mobile_ac100_100t' in by_id
+        lieb = by_id['liebherr_mobile_ltm1100_100t']
+        assert lieb['file_count'] == 2
+        primary = next(f for f in lieb['files'] if f['is_primary'])
+        assert primary['label'] == 'Outrigger'

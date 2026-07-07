@@ -273,3 +273,18 @@ Each entry records a decision made during the programme, the reasoning, and cons
 **Rationale (find):** The daily task is reading a dense load chart, so "jump to the value" is the high-value viewer feature. Item-level highlighting is a deliberate MVP tradeoff — sub-word highlighting needs per-glyph geometry (a full text layer), but in real charts each cell is its own text item, so item-level already highlights individual cells. A dedicated `state.findToken` guards the async cross-page scan against a file switch mid-scan (mirrors `openToken`/`renderToken`).
 
 **Consequences:** `#pdf-canvas` is now wrapped in `#pdf-stage` (position:relative) alongside `#pdf-highlights`. New E2E: `TestFind` (drives search → 2 matches, next, 0/0 miss, with real extractable text via `_make_text_pdf`) and `TestMultiFileUI::test_rename_file_label`. `Ctrl/Cmd+F` is intercepted only while a document is open. Audit gains a `label_edit` event. 59 backend + 11 E2E tests, all green. Ships as v1.2.0.
+
+---
+
+## DL-023 — Bulk import: filename-convention grouping + configurable rate limits
+
+**Date:** 2026-07-07
+**Finding:** F-004 (new feature — seed the catalogue by dropping many PDFs at once)
+
+**Decisions:**
+1. **Group by parsed (make, model), one grid row = one crane.** The house convention `Manufacturer Model (Label).pdf` encodes make + model + a per-file label (the parenthetical), and the whole point of the parenthetical is that a crane has several files. So the importer groups files by (make, model) into one crane rather than one-file-one-crane. This is not just ergonomic — one-file-one-crane would generate duplicate crane slugs for a crane's multiple files and 409 on the second, forcing manual cleanup. Grouping sidesteps that entirely.
+2. **Annotate-first, client-held (no staging table).** Files stay as browser `File` objects until submit; nothing hits the server until the user fills Type + Capacity (the two fields not in the filename) and clicks Import. Chosen over a server-side "inbox" (upload-first) because the user confirmed this is a one-time seed — an inbox data-model addition wasn't worth it. Tradeoff: closing the tab mid-import loses unsubmitted rows.
+3. **Primary selection in the grid.** Single-file crane → its only file is primary automatically. Multi-file crane → a radio per file, defaulting to the first, so the user picks the main chart during import. Implemented by uploading the chosen file *first* (it becomes the crane's primary by construction), then the rest — no separate set-primary call.
+4. **Raise + config-drive the rate limits.** Bulk uploads would trip the old 10/min upload cap. Limits are now `app.config['UPLOAD_RATE'|'WRITE_RATE']` (default 60/min, env `CRANE_UPLOAD_RATE`/`CRANE_WRITE_RATE`), read via a callable in the `@limiter.limit` decorators so tests pin them low and the conftest resets them per-test. Safe to raise because the app is behind the tinyauth gate (RR-001). The client also retries 429s with backoff (`withRetry`) as a belt-and-braces measure.
+
+**Consequences:** `POST /api/upload` gained an optional `label` form field (carries the primary file's parenthetical). Multi-file **drop** and multi-select **picker** both route into the importer; a single file still uses the metadata modal, now filename-prefilled. New `bulkImport` module + `#bulk-modal` grid; `parseFilename()` shared with the single-upload prefill. New E2E `TestBulkImport` (3 files → 2 cranes, fill-down, Outrigger chosen as primary, verified server-side). Also fixed a latent v1.2.0 bug found along the way: `Ctrl+F` (find) also triggered the `f` fullscreen shortcut because single-key shortcuts didn't bail on a modifier chord — added `if (mod) return;`. 60 backend + 12 E2E tests, all green. Ships as v1.3.0.

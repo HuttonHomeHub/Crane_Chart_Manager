@@ -40,6 +40,9 @@ def app(tmp_path, monkeypatch):
 
     app_module.init_db()  # create tables in the per-test database
     app_module.app.config['TESTING'] = True
+    # Give tests generous rate headroom by default; the rate-limit test pins these low.
+    app_module.app.config['UPLOAD_RATE'] = '1000 per minute'
+    app_module.app.config['WRITE_RATE'] = '1000 per minute'
     app_module.limiter.reset()
     return app_module.app
 

@@ -137,6 +137,12 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# R-013 rate limits. Defaults are generous enough for the bulk importer (one
+# authenticated user behind the reverse-proxy gate); tune down via env if the app
+# is ever exposed more broadly. Read through app.config so the decorators (which
+# pass a callable) pick up test overrides.
+app.config['UPLOAD_RATE'] = os.environ.get('CRANE_UPLOAD_RATE', '60 per minute')
+app.config['WRITE_RATE'] = os.environ.get('CRANE_WRITE_RATE', '60 per minute')
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 @app.errorhandler(RequestEntityTooLarge)
@@ -535,7 +541,7 @@ def get_pdfs():
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route("/api/upload", methods=['POST'])
-@limiter.limit("10 per minute")
+@limiter.limit(lambda: app.config['UPLOAD_RATE'])
 def upload_file():
     """Create a new crane from its first (primary) PDF + metadata."""
     if 'file' not in request.files:
@@ -546,6 +552,9 @@ def upload_file():
     model_type = request.form.get('type', 'Unknown')
     model = request.form.get('model', 'Unknown')
     capacity = request.form.get('capacity', 'Unknown')
+    # Optional label for the crane's first file (used by the bulk importer to carry
+    # the "(...)" parenthetical from the filename onto the primary file).
+    label = (request.form.get('label') or '').strip()
 
     bad = _reject_bad_pdf(file)
     if bad:
@@ -556,6 +565,7 @@ def upload_file():
         cap_field(model_type, 'Type')
         cap_field(model, 'Model')
         cap_field(capacity, 'Capacity')
+        cap_field(label, 'Label')
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -579,7 +589,7 @@ def upload_file():
                 cur = conn.execute(
                     '''INSERT INTO files (crane_id, stored_name, original_filename, label, uploaded_at)
                        VALUES (?, ?, ?, ?, ?)''',
-                    (crane_id, stored_name, secure_filename(file.filename), '', now),
+                    (crane_id, stored_name, secure_filename(file.filename), label, now),
                 )
                 conn.execute('UPDATE cranes SET primary_file=? WHERE id=?', (cur.lastrowid, crane_id))
                 conn.commit()
@@ -592,7 +602,7 @@ def upload_file():
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route("/api/cranes/<crane_id>/files", methods=['POST'])
-@limiter.limit("30 per minute")
+@limiter.limit(lambda: app.config['WRITE_RATE'])
 def add_crane_file(crane_id):
     """Attach a supplementary PDF to an existing crane, with an optional label."""
     crane_id = secure_filename(crane_id)
@@ -635,7 +645,7 @@ def add_crane_file(crane_id):
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route("/api/cranes/<crane_id>/primary", methods=['PUT'])
-@limiter.limit("30 per minute")
+@limiter.limit(lambda: app.config['WRITE_RATE'])
 def set_primary_file(crane_id):
     """Designate which file opens by default for a crane."""
     crane_id = secure_filename(crane_id)
@@ -665,7 +675,7 @@ def set_primary_file(crane_id):
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route("/api/cranes/<crane_id>/files/<int:file_id>", methods=['PATCH'])
-@limiter.limit("30 per minute")
+@limiter.limit(lambda: app.config['WRITE_RATE'])
 def update_file_label(crane_id, file_id):
     """Rename a file's label (the human-readable name shown on its strip chip)."""
     crane_id = secure_filename(crane_id)
@@ -698,7 +708,7 @@ def update_file_label(crane_id, file_id):
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route("/api/cranes/<crane_id>/files/<int:file_id>", methods=['DELETE'])
-@limiter.limit("30 per minute")
+@limiter.limit(lambda: app.config['WRITE_RATE'])
 def delete_crane_file(crane_id, file_id):
     """Delete one file from a crane. Deleting the crane's last file deletes the
     whole crane; deleting the primary lets it fall back to the earliest remaining."""
@@ -741,7 +751,7 @@ def delete_crane_file(crane_id, file_id):
         return jsonify({'error': 'Internal server error'}), 500
 
 @app.route("/api/metadata/<crane_id>", methods=['PUT'])
-@limiter.limit("30 per minute")
+@limiter.limit(lambda: app.config['WRITE_RATE'])
 def update_metadata(crane_id):
     """Edit a crane's metadata. Renames its uploads/<slug>/ directory (a single
     atomic rename covering all its files) when the derived slug changes."""
@@ -825,7 +835,7 @@ def download_file(filename):
         return jsonify({'error': 'File not found'}), 404
 
 @app.route("/api/delete/<crane_id>", methods=['DELETE'])
-@limiter.limit("30 per minute")
+@limiter.limit(lambda: app.config['WRITE_RATE'])
 def delete_file(crane_id):
     """Delete a whole crane — all its files, its directory, and its rows.
 

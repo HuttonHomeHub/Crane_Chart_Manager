@@ -99,6 +99,18 @@ class TestUploadEditDelete:
         r = upload(client, csrf)  # same fields → same crane id
         assert r.status_code == 409
 
+    def test_upload_accepts_primary_label(self, client, csrf):
+        """The bulk importer passes a label for the crane's first file."""
+        r = client.post(
+            '/api/upload',
+            data={'file': tiny_pdf_file(), 'make': 'Liebherr', 'type': 'Mobile',
+                  'model': 'LTM1100', 'capacity': '100t', 'label': 'Load Chart'},
+            headers=_hdrs(csrf),
+            content_type='multipart/form-data',
+        )
+        assert r.status_code == 201
+        assert r.json['files'][0]['label'] == 'Load Chart'
+
     def test_edit_with_rename(self, client, csrf):
         first = upload(client, csrf).json
         r = client.put(
@@ -434,7 +446,9 @@ class TestDeleteFileLock:
 
 class TestRateLimiting:
     def test_upload_rate_limit_returns_429(self, app, client, csrf):
-        """Exceeding 10 uploads/minute from the same IP triggers a 429."""
+        """Exceeding the configured upload rate from the same IP triggers a 429.
+        The limit is a config-driven callable, so the test pins it low."""
+        app.config['UPLOAD_RATE'] = '5 per minute'
         app_module.limiter.reset()
         succeeded = 0
         hit_limit = False
@@ -447,7 +461,7 @@ class TestRateLimiting:
                 assert r.is_json
                 assert 'error' in r.json
                 break
-        assert hit_limit, f'expected a 429 after 10 uploads; got {succeeded} successes with no 429'
+        assert hit_limit, f'expected a 429 after 5 uploads; got {succeeded} successes with no 429'
 
 
 # ----------------------------------------------------------------------
