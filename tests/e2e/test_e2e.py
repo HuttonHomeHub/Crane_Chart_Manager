@@ -594,11 +594,32 @@ class TestSidebarUX:
         expect(page.locator('.make-item').filter(has_text='Gammacrane')).to_be_hidden()
 
 
-class TestBackupUI:
-    def test_download_backup_button(self, page: Page, live_server: str):
-        """The app-bar backup button streams a .zip download."""
+class TestSettingsPanel:
+    def test_settings_backup_flow_and_info(self, page: Page, live_server: str):
+        """The gear opens Settings; it shows instance info, backs up on demand, lists the
+        backup, and downloads it; plus a fresh-backup download."""
         page.goto(live_server)
-        _api_upload(page, live_server, make='Backupco', model_type='Mobile', model='BK1', capacity='10t')
+        _api_upload(page, live_server, make='Setco', model_type='Mobile', model='SC1', capacity='10t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        page.locator('#settings-btn').click()
+        expect(page.locator('#settings-modal')).to_be_visible(timeout=3000)
+
+        # Instance info renders (version + paths).
+        expect(page.locator('#settings-info')).to_contain_text('Version')
+        expect(page.locator('#settings-info')).to_contain_text('Database')
+
+        # Back up now → the backup appears in the list.
+        page.locator('#settings-backup-now').click()
+        expect(page.locator('.settings__backup-name')).to_have_count(1, timeout=5000)
+
+        # Download that specific backup.
         with page.expect_download() as dl:
-            page.locator('#backup-btn').click()
+            page.locator('.settings__backup-name').first.click()
         assert dl.value.suggested_filename.endswith('.zip')
+
+        # And the "Download fresh" button streams one too.
+        with page.expect_download() as dl2:
+            page.locator('#settings-backup-download').click()
+        assert dl2.value.suggested_filename.endswith('.zip')

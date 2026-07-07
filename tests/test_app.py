@@ -651,6 +651,31 @@ class TestBackup:
         with zipfile.ZipFile(io.BytesIO(r.data)) as z:
             assert 'crane.db' in z.namelist()
 
+    def test_download_existing_backup_by_name(self, client, csrf):
+        client.post('/api/backup', headers=_hdrs(csrf))
+        name = client.get('/api/backup').json['backups'][0]['name']
+        r = client.get(f'/api/backup/download/{name}')
+        assert r.status_code == 200
+        assert 'attachment' in r.headers.get('Content-Disposition', '')
+
+    def test_download_backup_bad_name_404(self, client):
+        # Wrong pattern and traversal attempts are rejected.
+        assert client.get('/api/backup/download/notabackup.txt').status_code == 404
+        assert client.get('/api/backup/download/crane-backup-nope.zip').status_code == 404
+
+
+class TestInstanceInfo:
+    def test_info_endpoint(self, client, csrf):
+        upload(client, csrf)
+        r = client.get('/api/info')
+        assert r.status_code == 200
+        body = r.json
+        assert body['version'] == app_module.APP_VERSION
+        assert body['cranes'] == 1
+        assert body['files'] == 1
+        assert 'database' in body['paths'] and 'uploads' in body['paths']
+        assert body['limits']['max_upload_mb'] == app_module.MAX_CONTENT_LENGTH // (1024 * 1024)
+
 
 # ----------------------------------------------------------------------
 # R-020: Audit trail

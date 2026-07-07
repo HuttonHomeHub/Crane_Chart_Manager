@@ -240,6 +240,21 @@ const api = {
         if (!r.ok) throw new Error((await safeErr(r)) || 'Delete failed');
         return r.json();
     },
+    async backupStatus() {
+        const r = await fetch('/api/backup');
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Could not load backups');
+        return r.json();
+    },
+    async instanceInfo() {
+        const r = await fetch('/api/info');
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Could not load info');
+        return r.json();
+    },
+    async backupNow() {
+        const r = await fetch('/api/backup', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken() } });
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Backup failed');
+        return r.json();
+    },
 };
 
 async function safeErr(r) {
@@ -2191,16 +2206,121 @@ $$('[data-modal-close]').forEach(btn => {
 });
 $('#help-toggle').addEventListener('click', () => modal.open('shortcuts-modal'));
 
-// RR-010: download a full backup (crane.db + uploads) as a zip. The server builds it
-// on the fly, so reassure the user while it streams.
-$('#backup-btn').addEventListener('click', () => {
-    toast.info('Preparing backup', 'Your download will start shortly.');
-    const a = document.createElement('a');
-    a.href = '/api/backup/download';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => a.remove(), 150);
-});
+/* =========================================================
+   REGION: SETTINGS (read-only config + backups)
+   ========================================================= */
+const settings = (() => {
+    function fmtBytes(n) {
+        if (n == null) return '—';
+        const u = ['B', 'KB', 'MB', 'GB'];
+        let i = 0, v = n;
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+        return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
+    }
+    function fmtDate(iso) {
+        if (!iso) return '—';
+        try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+    }
+
+    function triggerDownload(url) {
+        const a = document.createElement('a');
+        a.href = url;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 150);
+    }
+
+    async function open() {
+        modal.open('settings-modal');
+        $('#settings-backup-meta').textContent = 'Loading…';
+        $('#settings-backup-list').innerHTML = '';
+        $('#settings-info').innerHTML = '';
+        try {
+            const [status, info] = await Promise.all([api.backupStatus(), api.instanceInfo()]);
+            render(status, info);
+        } catch (err) {
+            $('#settings-backup-meta').textContent = 'Could not load settings: ' + (err.message || err);
+        }
+    }
+
+    function render(status, info) {
+        const badge = $('#settings-backup-state');
+        badge.textContent = status.enabled ? 'Automatic' : 'Manual only';
+        badge.className = 'settings__badge ' + (status.enabled ? 'is-on' : 'is-off');
+
+        const meta = [
+            status.enabled ? `every ${status.interval_hours}h, keep ${status.keep}` : 'scheduler off',
+            status.include_uploads ? 'DB + PDFs' : 'DB only',
+            status.latest ? `last ${fmtDate(status.latest.modified)}` : 'none yet',
+        ];
+        $('#settings-backup-meta').textContent = `${meta.join(' · ')}\n${status.dir}`;
+
+        const list = $('#settings-backup-list');
+        list.innerHTML = '';
+        if (!status.backups.length) {
+            const li = document.createElement('li');
+            li.className = 'settings__backups-empty';
+            li.textContent = 'No backups yet.';
+            list.appendChild(li);
+        } else {
+            for (const b of status.backups) {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.className = 'settings__backup-name';
+                a.textContent = b.name.replace(/^crane-backup-/, '').replace(/\.zip$/, '');
+                a.title = 'Download ' + b.name;
+                a.href = '/api/backup/download/' + encodeURIComponent(b.name);
+                const size = document.createElement('span');
+                size.className = 'settings__backup-size';
+                size.textContent = fmtBytes(b.size);
+                li.appendChild(a);
+                li.appendChild(size);
+                list.appendChild(li);
+            }
+        }
+
+        const dl = $('#settings-info');
+        dl.innerHTML = '';
+        const rows = [
+            ['Version', info.version],
+            ['Catalogue', `${info.cranes} cranes · ${info.files} files`],
+            ['Database', info.paths.database],
+            ['PDFs', info.paths.uploads],
+            ['Backups', info.paths.backups],
+            ['Max upload', `${info.limits.max_upload_mb} MB`],
+            ['Behind proxy', info.trust_proxy ? 'yes' : 'no'],
+        ];
+        for (const [k, v] of rows) {
+            const dt = document.createElement('dt'); dt.textContent = k;
+            const dd = document.createElement('dd'); dd.textContent = v; dd.title = v;
+            dl.appendChild(dt); dl.appendChild(dd);
+        }
+    }
+
+    async function backupNow() {
+        const btn = $('#settings-backup-now');
+        btn.disabled = true;
+        try {
+            await api.backupNow();
+            toast.success('Backup created');
+            const [status, info] = await Promise.all([api.backupStatus(), api.instanceInfo()]);
+            render(status, info);
+        } catch (err) {
+            toast.danger('Backup failed', err.message || String(err));
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    $('#settings-btn').addEventListener('click', open);
+    $('#settings-backup-now').addEventListener('click', backupNow);
+    $('#settings-backup-download').addEventListener('click', () => {
+        toast.info('Preparing backup', 'Your download will start shortly.');
+        triggerDownload('/api/backup/download');
+    });
+
+    return { open };
+})();
 
 /* =========================================================
    REGION: INIT

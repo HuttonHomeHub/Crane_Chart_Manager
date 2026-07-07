@@ -64,6 +64,7 @@
             <symbol id="icon-minimize" viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></symbol>
             <symbol id="icon-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
             <symbol id="icon-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+            <symbol id="icon-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
             <symbol id="icon-edit-3" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
             <symbol id="icon-trash-2" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
             <symbol id="icon-file-text" viewBox="0 0 24 24"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></symbol>
@@ -98,8 +99,8 @@
             <button class="btn btn--ghost btn--icon app-bar__search-toggle" id="search-toggle" aria-label="Open search" title="Search">
                 <svg class="icon"><use href="#icon-search"/></svg>
             </button>
-            <button class="btn btn--ghost btn--icon" id="backup-btn" aria-label="Download backup" title="Download a full backup (database + PDFs)">
-                <svg class="icon"><use href="#icon-database"/></svg>
+            <button class="btn btn--ghost btn--icon" id="settings-btn" aria-label="Settings" title="Settings &amp; backups">
+                <svg class="icon"><use href="#icon-settings"/></svg>
             </button>
             <button class="btn btn--ghost btn--icon" id="theme-toggle" aria-label="Toggle theme" title="Toggle theme">
                 <svg class="icon" id="theme-icon"><use href="#icon-moon"/></svg>
@@ -332,6 +333,48 @@
                 <button type="button" class="btn btn--ghost" data-modal-close="bulk-modal">Cancel</button>
                 <button type="button" class="btn btn--primary" id="bulk-submit">Import</button>
             </footer>
+        </div>
+    </dialog>
+
+    <!-- Settings & backups (read-only config; deployment settings live in compose) -->
+    <dialog class="modal" id="settings-modal" aria-labelledby="settings-title">
+        <div class="modal__panel modal__panel--md">
+            <header class="modal__header">
+                <h2 id="settings-title">Settings</h2>
+                <button class="modal__close" data-modal-close="settings-modal" aria-label="Close dialog">
+                    <svg class="icon"><use href="#icon-x"/></svg>
+                </button>
+            </header>
+            <div class="modal__body settings">
+                <section class="settings__card">
+                    <div class="settings__card-head">
+                        <h3>Backups</h3>
+                        <span class="settings__badge" id="settings-backup-state"></span>
+                    </div>
+                    <p class="settings__meta" id="settings-backup-meta"></p>
+                    <div class="settings__actions">
+                        <button type="button" class="btn btn--primary btn--sm" id="settings-backup-now">
+                            <svg class="icon"><use href="#icon-database"/></svg><span>Back up now</span>
+                        </button>
+                        <button type="button" class="btn btn--ghost btn--sm" id="settings-backup-download">
+                            <svg class="icon"><use href="#icon-download"/></svg><span>Download fresh</span>
+                        </button>
+                    </div>
+                    <ul class="settings__backups" id="settings-backup-list" aria-label="Existing backups"></ul>
+                </section>
+
+                <section class="settings__card">
+                    <div class="settings__card-head"><h3>This instance</h3></div>
+                    <dl class="settings__info" id="settings-info"></dl>
+                    <div class="settings__actions">
+                        <a class="btn btn--ghost btn--sm" href="/api/export" id="settings-export">
+                            <svg class="icon"><use href="#icon-download"/></svg><span>Export metadata (JSON)</span>
+                        </a>
+                    </div>
+                    <p class="settings__note">Deployment settings (paths, backups, proxy) are configured
+                       via environment variables in your compose file, not here.</p>
+                </section>
+            </div>
         </div>
     </dialog>
 

@@ -1510,6 +1510,81 @@ dialog.modal::backdrop {
     max-width: 55%;
 }
 
+/* ---- Settings panel ------------------------------------------------------- */
+.settings { display: flex; flex-direction: column; gap: var(--space-4); }
+.settings__card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    background: var(--bg-canvas);
+}
+.settings__card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+.settings__card-head h3 { font-size: 13px; font-weight: 700; }
+.settings__badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    border-radius: var(--radius-pill);
+}
+.settings__badge.is-on  { color: var(--accent-fg); background: var(--accent); }
+.settings__badge.is-off { color: var(--fg-secondary); background: var(--bg-surface-raised); }
+.settings__meta {
+    font-size: 11.5px;
+    color: var(--fg-tertiary);
+    white-space: pre-line;      /* the target dir sits on its own line */
+    word-break: break-all;
+    margin-bottom: var(--space-3);
+}
+.settings__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.settings__backups { list-style: none; margin-top: var(--space-3); display: flex; flex-direction: column; gap: 1px; }
+.settings__backups li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+}
+.settings__backups li:hover { background: var(--bg-surface-raised); }
+.settings__backups-empty { color: var(--fg-tertiary); font-size: 12px; }
+.settings__backup-name {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-secondary);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.settings__backup-name:hover { color: var(--accent); text-decoration: underline; }
+.settings__backup-size { flex-shrink: 0; font-size: 11px; color: var(--fg-tertiary); font-variant-numeric: tabular-nums; }
+
+.settings__info {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px var(--space-4);
+    margin-bottom: var(--space-3);
+}
+.settings__info dt { font-size: 11px; font-weight: 600; color: var(--fg-tertiary); }
+.settings__info dd {
+    font-size: 12px;
+    color: var(--fg-secondary);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.settings__note { font-size: 11px; color: var(--fg-tertiary); margin-top: var(--space-2); line-height: 1.5; }
+
 /* Form fields */
 .form-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-field label {

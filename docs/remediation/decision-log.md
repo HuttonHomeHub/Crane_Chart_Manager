@@ -1,7 +1,7 @@
 # Decision Log
 
 Crane Charts — living record of significant design decisions.  
-Last updated: 2026-07-07 (v1.5.0)
+Last updated: 2026-07-07 (v1.6.0)
 
 `DL-001`–`DL-020` cover the 2026-07-06 engineering remediation (see [README.md](README.md));
 `DL-021` onward cover the post-1.0 features (multi-file cranes, in-PDF find, bulk import,
@@ -393,3 +393,30 @@ import, so both conftests set `CRANE_BACKUP_ENABLED=0` (no thread) and monkeypat
 to a temp path. 71 backend + 18 E2E tests (7 backend backup tests incl. the snapshot being a
 valid queryable SQLite DB + rotation; 1 E2E for the download button). RR-010 → MITIGATED.
 Ships as v1.5.0.
+
+---
+
+## DL-028 — Settings panel: surface backups + read-only instance info, not an env editor
+
+**Date:** 2026-07-07
+**Finding:** F-009 (make the v1.5.0 backups visible/verifiable; a place for instance info)
+
+**Decisions:**
+1. **Read-only, not a config editor.** The panel deliberately does NOT let you edit the env
+   vars. Most are read once at container start (paths, backup interval captured by the
+   scheduler thread) so a UI control would silently do nothing until a restart; and
+   `CRANE_TRUST_PROXY` is a *security* control — a UI toggle for "trust proxy headers" would be
+   a footgun. Deployment config belongs in compose (version-controlled, reproducible). The
+   panel shows config read-only and says so.
+2. **Backups are the point.** v1.5.0 shipped backups but they were invisible (a lone button +
+   a hidden status endpoint) — you couldn't tell if last night's run happened. The Backups card
+   surfaces status (schedule, target, last run, DB-only vs full), a "Back up now" button, and a
+   list of existing backups each downloadable via `GET /api/backup/download/<name>` (pattern-
+   restricted + `send_from_directory` traversal-safe). Trust comes from being able to *see* it.
+3. **Consolidated the app-bar.** The standalone database/download button became a gear that
+   opens Settings (download lives inside), keeping the app-bar from growing a button per admin
+   action. `GET /api/info` backs the read-only instance card (version, counts, paths, limits).
+
+**Consequences:** New `settings` JS module + `#settings-modal`; routes `GET /api/info` and
+`GET /api/backup/download/<name>`. 75 backend + 18 E2E (3 new backend: info + download-by-name
++ bad-name 404; the E2E backup test became a full settings-flow test). Ships as v1.6.0.

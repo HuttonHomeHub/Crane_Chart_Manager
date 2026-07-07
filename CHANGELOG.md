@@ -4,6 +4,16 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.6.0 — settings panel
+- The app-bar **gear** opens a **Settings** panel: a **Backups** card (status, schedule,
+  "Back up now", "Download fresh", and a list of existing backups you can download
+  individually) and a **This instance** card (version, catalogue counts, data/PDF/backup
+  paths, limits, proxy) — plus the metadata export link.
+- It's **read-only** — deployment config stays in compose (some is read-once at start, and
+  `CRANE_TRUST_PROXY` is a security control that shouldn't be UI-toggleable).
+- New: `GET /api/info`, `GET /api/backup/download/<name>`. The standalone backup button became
+  the Settings gear. (DL-028)
+
 ## v1.5.0 — automated backups
 - Closes the last real risk (RR-010): the app now writes periodic **full backups** — a
   consistent `crane.db` snapshot (SQLite online-backup API) plus a zip of `uploads/` — to

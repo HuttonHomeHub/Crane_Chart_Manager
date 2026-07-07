@@ -1075,6 +1075,41 @@ def backup_download():
         app.logger.exception('backup_download failed')
         return jsonify({'error': 'Internal server error'}), 500
 
+@app.route("/api/backup/download/<name>", methods=['GET'])
+def backup_download_file(name):
+    """Download a specific existing backup file from BACKUP_DIR (as listed by
+    GET /api/backup). Restricted to the backup naming pattern; send_from_directory
+    safe-joins the path to prevent traversal."""
+    if not (name.startswith(BACKUP_PREFIX) and name.endswith('.zip')):
+        return jsonify({'error': 'Not found'}), 404
+    try:
+        return send_from_directory(BACKUP_DIR, name, as_attachment=True)
+    except NotFound:
+        return jsonify({'error': 'Not found'}), 404
+
+@app.route("/api/info", methods=['GET'])
+def instance_info():
+    """Read-only view of how this instance is configured (for the Settings panel)."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cranes = conn.execute('SELECT COUNT(*) FROM cranes').fetchone()[0]
+            files = conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
+    except Exception:
+        cranes = files = -1
+    return jsonify({
+        'version': APP_VERSION,
+        'cranes': cranes,
+        'files': files,
+        'trust_proxy': os.environ.get('CRANE_TRUST_PROXY', '0') == '1',
+        'paths': {'database': DB_FILE, 'uploads': UPLOAD_FOLDER, 'backups': BACKUP_DIR},
+        'limits': {
+            'max_upload_mb': MAX_CONTENT_LENGTH // (1024 * 1024),
+            'max_field_len': MAX_FIELD_LEN,
+            'upload_rate': app.config['UPLOAD_RATE'],
+            'write_rate': app.config['WRITE_RATE'],
+        },
+    }), 200
+
 @app.route("/health", methods=['GET'])
 def health():
     """R-023: liveness probe for load balancers and uptime monitors.

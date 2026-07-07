@@ -94,9 +94,10 @@ to work (the CSRF cookie's `Secure` flag and rate-limit keying depend on it).
 ### Backups
 
 The app writes periodic **full backups** — a consistent `crane.db` snapshot plus a zip of
-`uploads/` — to `CRANE_BACKUP_DIR`, pruned to `CRANE_BACKUP_KEEP`. The **database button** in
-the app-bar downloads one on demand. Restore by unzipping into the data directory (`crane.db`
-and `uploads/` sit at the zip root).
+`uploads/` — to `CRANE_BACKUP_DIR`, pruned to `CRANE_BACKUP_KEEP`. The **Settings** panel (the
+app-bar gear) shows backup status, a "Back up now" button, and a downloadable list of existing
+backups (plus read-only instance info). Restore by unzipping into the data directory
+(`crane.db` and `uploads/` sit at the zip root).
 
 For real safety, point `CRANE_BACKUP_DIR` at a **separate mount** (e.g. a NAS share) so a
 single-disk failure doesn't take the backups with it:
