@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 flask --debug run              # dev server on :5000 with auto-reload
 pytest tests/                  # full suite (unit + integration; 64 tests, ~1.0s)
-pytest tests/e2e/              # Playwright E2E suite (15 tests; requires Chromium)
+pytest tests/e2e/              # Playwright E2E suite (17 tests; requires Chromium)
 pytest tests/test_app.py::TestClassName::test_name -v   # single test
 python -m playwright install chromium   # install browser once after pip install
 ```
@@ -57,7 +57,7 @@ Single-process Flask app. State is the `uploads/` directory plus `crane.db` (SQL
 
 **Pagination.** `GET /api/pdfs?after=<crane_id>&limit=<n>` returns `{"items": [...crane dicts...], "total": N, "next_cursor": "<last-crane-id-of-page>" | null}`. `next_cursor` is the id of the last crane on the current page; the caller sends `?after=<next_cursor>` for the next page. `api.listPdfs(onPage)` in `static/main.js` fetches bounded pages (`PDFS_PAGE_SIZE = 200`) in a loop and invokes `onPage` with each page's items; `loadFileList()` uses this to repaint the sidebar progressively when a catalogue spans more than one page. Each crane item carries `name` (= id, sidebar keying compat), `url` (primary file), and `file_count`.
 
-**Virtual scrolling (sidebar).** `sidebar.selectMake()` doesn't build every `.model-item` row up front — it flattens type headers + rows into `this._modelQueue` and renders `MODEL_RENDER_BATCH_SIZE` (60) at a time via `_appendModelBatch()`. A trailing `.sidebar__sentinel` element, observed by an `IntersectionObserver` rooted on `#model-list`, triggers the next batch as the user scrolls. `sidebar.filter()` calls `_flushModelQueue()` first so text search can match rows that haven't been scrolled into view yet. When adding new sidebar rendering logic, remember rows may not exist in the DOM yet — don't assume `document.querySelectorAll('.model-item')` is exhaustive.
+**Virtual scrolling (sidebar).** `sidebar.selectMake()` doesn't build every `.model-item` row up front — it flattens type headers + rows into `this._modelQueue` and renders `MODEL_RENDER_BATCH_SIZE` (60) at a time via `_appendModelBatch()`. A trailing `.sidebar__sentinel` element, observed by an `IntersectionObserver` rooted on `#model-list`, triggers the next batch as the user scrolls. `sidebar.filter()` calls `_flushModelQueue()` first so text search can match rows that haven't been scrolled into view yet. When adding new sidebar rendering logic, remember rows may not exist in the DOM yet — don't assume `document.querySelectorAll('.model-item')` is exhaustive. Type headers are `<button>`s that toggle `.type-group.is-collapsed` (CSS hides `.model-item` when collapsed); `filter()` force-expands groups on a query so matches aren't hidden. `filter()` also keeps a make visible when the query matches any of its cranes via `sidebar._makeSearchText` (per-make concatenated model/type/capacity/label text built in `renderMakes()`), not just the make name.
 
 **CSRF via double-submit cookie.** `_csrf_guard` before-request hook rejects any `POST/PUT/PATCH/DELETE` unless the `crane_csrf` cookie matches the `X-CSRF-Token` header (`secrets.compare_digest`). GETs are exempt. `_csrf_issue` after-request hook mints the cookie if absent. No `SECRET_KEY` and no Flask-WTF — deliberate. Any new mutating route inherits the guard automatically.
 

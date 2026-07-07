@@ -4,6 +4,17 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.4.0 — sidebar usability
+- **Wider Models column** (sidebar rebalanced to `148px 1fr`, 430px) so model names like
+  `LTM1090-4.1` aren't truncated; tighter model rows so long catalogues scroll less.
+- **Collapsible type groups** — click a type header (now a button with a chevron + count) to
+  fold that group away.
+- **Smarter search** — a manufacturer stays in the list when the query matches any of its
+  cranes' model/capacity/type/label, not just the make name (so searching `500t` keeps the
+  makes that *have* a 500t crane); searching also expands any collapsed groups.
+- Fixed a pre-existing bug: model names were centre-aligned (the row body is a `<button>`).
+  (DL-026)
+
 ## v1.3.2 — asset cache-busting + version indicator
 - `main.js`/`main.css` URLs now carry a content-hash `?v=` (`versioned_static()`), so a new
   deploy always serves fresh assets — **no more hard-refresh after updates** (from this

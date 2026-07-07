@@ -1,7 +1,7 @@
 # Decision Log
 
 Crane Charts — living record of significant design decisions.  
-Last updated: 2026-07-07 (v1.3.2)
+Last updated: 2026-07-07 (v1.4.0)
 
 `DL-001`–`DL-020` cover the 2026-07-06 engineering remediation (see [README.md](README.md));
 `DL-021` onward cover the post-1.0 features (multi-file cranes, in-PDF find, bulk import,
@@ -318,3 +318,37 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Rationale:** Flask already does ETag revalidation, but "tab left open" and browser heuristic caching still served stale `main.js` after a deploy (the user hit exactly this). A hashed URL is a different resource, so the browser is forced to fetch it — the standard, reliable fix. Query-string busting doesn't interact with CSP (script-src matches host, not query), and the modulepreload + script `src` use the same helper so their URLs match and the preload is still used.
 
 **Consequences:** New `versioned_static()` + `_asset_hash()` helpers and context-processor exposure; `GET /version`; `.app-bar__version` label; Dockerfile `ARG/ENV CRANE_VERSION`; workflow `build-args`. 64 backend + 15 E2E, all green. Ships as v1.3.2 — **the last release that needs a manual hard-refresh; every deploy after this serves fresh assets automatically.**
+
+---
+
+## DL-026 — Sidebar usability: collapsible groups + cross-field make search
+
+**Date:** 2026-07-07
+**Finding:** F-008 (user feedback on a large real catalogue — 34 Liebherr models)
+
+**Decisions:**
+1. **Rebalance the sidebar, don't just widen it.** Grid columns went `1fr 1fr` → `148px 1fr`
+   (total 380px → 430px): manufacturer names are short, model names (`LTM1090-4.1`) were
+   truncating. Model rows tightened (padding `space-2`→`4px`, margin `2px`→`1px`) so a long
+   list scrolls less.
+2. **Collapsible type groups.** The type header became a `<button>` (chevron + label + count)
+   toggling `.type-group.is-collapsed`, which hides its `.model-item`s via CSS. Collapse is
+   purely visual, so it composes with the R-017 virtual-scroll batching untouched. A search
+   force-expands all groups (`filter()`), because a match hidden inside a collapsed group
+   would be invisible and confusing.
+3. **Cross-field make search.** Previously a make was filtered by its *name* only, so
+   searching a capacity like `500t` hid every manufacturer (no name contains "500t"). Now
+   `renderMakes()` builds `sidebar._makeSearchText[make]` = the lowercased concatenation of
+   all that make's cranes' make/type/model/capacity + file labels, and `filter()` keeps a make
+   visible when the query hits that. The models panel (selected make) still filters its rows;
+   together this means "search 500t → the makes that have a 500t crane stay, click one to see
+   its 500t models."
+
+**Also fixed:** model names were centre-aligned because `.model-item__body` is a `<button>`
+(default `text-align:center`) — added `text-align:left`. A pre-existing bug the wider column
+made obvious; found by screenshotting the change rather than trusting the passing tests.
+
+**Consequences:** New `.type-header` button + chevron/count markup and CSS; `_makeSearchText`
+lookup. Two E2E tests (`TestSidebarUX`: collapse toggle, cross-field make search). 64 backend
++ 17 E2E, all green. Bundled with the v1.3.x documentation refresh (README/CHANGELOG/QA
+rewrite, remediation-docs consolidation). Ships as v1.4.0.

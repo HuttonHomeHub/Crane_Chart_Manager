@@ -1243,6 +1243,16 @@ const sidebar = {
         const makes = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
         $('#makes-count').textContent = String(makes.length);
 
+        // Per-make searchable text (all its cranes' fields + file labels) so a search
+        // like "500t" keeps the make visible even though its name doesn't contain "500t".
+        this._makeSearchText = {};
+        for (const make of makes) {
+            this._makeSearchText[make] = grouped[make].map(c =>
+                `${c.make || ''} ${c.type || ''} ${c.model || ''} ${c.capacity || ''} ` +
+                (c.files || []).map(f => f.label || '').join(' ')
+            ).join(' ').toLowerCase();
+        }
+
         for (const make of makes) {
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -1316,7 +1326,7 @@ const sidebar = {
         // thousands of models doesn't block the main thread on first selection.
         const queue = [];
         for (const type of types) {
-            queue.push({ kind: 'header', text: type });
+            queue.push({ kind: 'header', text: type, count: grouped[type].length });
             const models = grouped[type].slice().sort((a, b) =>
                 (a.model || '').localeCompare(b.model || '')
             );
@@ -1421,9 +1431,21 @@ const sidebar = {
             if (item.kind === 'header') {
                 const group = document.createElement('div');
                 group.className = 'type-group';
-                const head = document.createElement('div');
+                // Collapsible header: click to fold this type away (helps a long list).
+                const head = document.createElement('button');
+                head.type = 'button';
                 head.className = 'type-header';
-                head.textContent = item.text;
+                head.setAttribute('aria-expanded', 'true');
+                head.innerHTML = `
+                    <svg class="icon type-header__chevron"><use href="#icon-chevron-right"/></svg>
+                    <span class="type-header__label"></span>
+                    <span class="type-header__count"></span>`;
+                head.querySelector('.type-header__label').textContent = item.text;
+                head.querySelector('.type-header__count').textContent = String(item.count || '');
+                head.addEventListener('click', () => {
+                    const collapsed = group.classList.toggle('is-collapsed');
+                    head.setAttribute('aria-expanded', String(!collapsed));
+                });
                 group.appendChild(head);
                 list.appendChild(group);
                 this._modelTypeGroupEls[item.text] = group;
@@ -1525,11 +1547,24 @@ const sidebar = {
         const makeList = $('#make-list');
         const modelList = $('#model-list');
 
+        // A search must not hide matches inside a collapsed group — expand them.
+        if (q) {
+            $$('.type-group', modelList).forEach(g => {
+                g.classList.remove('is-collapsed');
+                const h = g.querySelector('.type-header');
+                if (h) h.setAttribute('aria-expanded', 'true');
+            });
+        }
+
         // F (round 7) + I (round 9): use a class instead of inline style so a stricter
         // CSP can drop 'unsafe-inline' from style-src-attr in the future.
+        // A make stays visible if the query matches its name OR any of its cranes
+        // (model/capacity/type/label), so searching "500t" keeps the makes that have one.
+        const searchText = this._makeSearchText || {};
         let visibleMakes = 0;
         $$('.make-item', makeList).forEach(el => {
-            const match = !q || el.textContent.toLowerCase().includes(q);
+            const hay = searchText[el.dataset.make] || el.textContent.toLowerCase();
+            const match = !q || hay.includes(q);
             el.classList.toggle('is-hidden', !match);
             if (match) visibleMakes++;
         });

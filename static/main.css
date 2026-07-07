@@ -489,12 +489,14 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
    ============================================================= */
 
 .sidebar {
-    width: 380px;
+    width: 430px;
     flex-shrink: 0;
     background: var(--bg-surface);
     border-right: 1px solid var(--border-subtle);
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* Manufacturers need little width; give the rest to Models so names like
+       "LTM1090-4.1" aren't truncated. */
+    grid-template-columns: 148px 1fr;
     overflow: hidden;
 }
 
@@ -625,8 +627,13 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
 .type-group { margin-top: var(--space-3); }
 .type-group:first-child { margin-top: var(--space-1); }
 
+/* Collapsible type header (a button; click to fold the group). */
 .type-header {
-    padding: var(--space-1) var(--space-3);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    width: 100%;
+    padding: var(--space-1) var(--space-2);
     margin: 0 0 var(--space-1) 0;
     font-size: 10px;
     font-weight: 700;
@@ -634,17 +641,37 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     text-transform: uppercase;
     color: var(--fg-tertiary);
     border-left: 2px solid var(--accent);
-    padding-left: var(--space-3);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
+.type-header:hover { color: var(--fg-secondary); background: var(--bg-surface-raised); }
+.type-header__label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.type-header__count {
+    font-weight: 600;
+    color: var(--fg-tertiary);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+}
+.type-header__chevron {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    transform: rotate(90deg);   /* expanded → points down */
+    transition: transform var(--dur-fast) var(--ease-out);
+}
+.type-group.is-collapsed .type-header__chevron { transform: rotate(0deg); }  /* collapsed → points right */
+.type-group.is-collapsed .model-item { display: none; }
 
-/* Model item */
+/* Model item — kept compact so a long catalogue doesn't require endless scrolling. */
 .model-item {
     width: 100%;
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-    margin: 2px 0;
+    padding: 4px var(--space-2) 4px var(--space-3);
+    margin: 1px 0;
     border-radius: var(--radius-md);
     background: transparent;
     border: 1px solid transparent;
@@ -667,6 +694,7 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     flex: 1;
     min-width: 0;
     cursor: pointer;
+    text-align: left;   /* it's a <button>, which would otherwise centre the text */
 }
 
 .model-item__name {

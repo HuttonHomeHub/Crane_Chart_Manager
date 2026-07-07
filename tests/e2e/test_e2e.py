@@ -556,3 +556,39 @@ class TestBulkImport:
         assert lieb['file_count'] == 2
         primary = next(f for f in lieb['files'] if f['is_primary'])
         assert primary['label'] == 'Outrigger'
+
+
+class TestSidebarUX:
+    def test_type_group_collapses(self, page: Page, live_server: str):
+        """Clicking a type header folds that group's model rows away."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Kato', model_type='Rough Terrain', model='KR1', capacity='25t')
+        _api_upload(page, live_server, make='Kato', model_type='All Terrain', model='KA1', capacity='50t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+        page.locator('.make-item').filter(has_text='Kato').click()
+
+        group = page.locator('.type-group').filter(has_text='Rough Terrain')
+        row = group.locator('.model-item')
+        expect(row).to_be_visible(timeout=5000)
+        group.locator('.type-header').click()
+        expect(group).to_have_class(re.compile(r'\bis-collapsed\b'))
+        expect(row).to_be_hidden()
+        # Clicking again expands it.
+        group.locator('.type-header').click()
+        expect(row).to_be_visible()
+
+    def test_search_keeps_makes_with_matching_models(self, page: Page, live_server: str):
+        """Searching a capacity keeps makes whose models match, even though the make
+        NAME doesn't contain the query."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Alphacrane', model_type='Mobile', model='AX1', capacity='500t')
+        _api_upload(page, live_server, make='Betacrane', model_type='All Terrain', model='BX1', capacity='500t')
+        _api_upload(page, live_server, make='Gammacrane', model_type='Mobile', model='GX1', capacity='60t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        page.locator('#search-input').fill('500t')
+        expect(page.locator('.make-item').filter(has_text='Alphacrane')).to_be_visible()
+        expect(page.locator('.make-item').filter(has_text='Betacrane')).to_be_visible()
+        expect(page.locator('.make-item').filter(has_text='Gammacrane')).to_be_hidden()
