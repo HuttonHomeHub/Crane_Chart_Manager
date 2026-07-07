@@ -695,3 +695,34 @@ class TestMultiFile:
     def test_delete_file_on_missing_crane_returns_404(self, client, csrf):
         r = client.delete('/api/cranes/nope/files/1', headers=_hdrs(csrf))
         assert r.status_code == 404
+
+    def test_edit_file_label(self, client, csrf):
+        crane = upload(client, csrf).json
+        fid = crane['files'][0]['id']
+        r = client.patch(
+            f'/api/cranes/{crane["id"]}/files/{fid}',
+            json={'label': 'Primary load chart'},
+            headers=_hdrs(csrf),
+        )
+        assert r.status_code == 200
+        edited = next(f for f in r.json['files'] if f['id'] == fid)
+        assert edited['label'] == 'Primary load chart'
+
+    def test_edit_label_too_long_returns_400(self, client, csrf):
+        crane = upload(client, csrf).json
+        fid = crane['files'][0]['id']
+        r = client.patch(
+            f'/api/cranes/{crane["id"]}/files/{fid}',
+            json={'label': 'X' * (app_module.MAX_FIELD_LEN + 1)},
+            headers=_hdrs(csrf),
+        )
+        assert r.status_code == 400
+
+    def test_edit_label_unknown_file_returns_404(self, client, csrf):
+        crane = upload(client, csrf).json
+        r = client.patch(
+            f'/api/cranes/{crane["id"]}/files/999999',
+            json={'label': 'x'},
+            headers=_hdrs(csrf),
+        )
+        assert r.status_code == 404

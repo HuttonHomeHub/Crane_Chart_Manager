@@ -664,6 +664,39 @@ def set_primary_file(crane_id):
         app.logger.exception('set_primary_file failed')
         return jsonify({'error': 'Internal server error'}), 500
 
+@app.route("/api/cranes/<crane_id>/files/<int:file_id>", methods=['PATCH'])
+@limiter.limit("30 per minute")
+def update_file_label(crane_id, file_id):
+    """Rename a file's label (the human-readable name shown on its strip chip)."""
+    crane_id = secure_filename(crane_id)
+    data = request.get_json(silent=True) or {}
+    label = (data.get('label') or '').strip()
+    try:
+        cap_field(label, 'Label')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    try:
+        with metadata_lock():
+            crane = get_crane(crane_id)
+            if crane is None:
+                return jsonify({'error': 'Crane not found'}), 404
+            target = next((f for f in crane['files'] if f['id'] == file_id), None)
+            if target is None:
+                return jsonify({'error': 'File not found on this crane'}), 404
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute('UPDATE files SET label=? WHERE id=? AND crane_id=?',
+                             (label, file_id, crane_id))
+                conn.commit()
+            crane = get_crane(crane_id)
+            log_event('label_edit', crane_id,
+                      before={'label': target['label']}, after={'label': label})
+
+        return jsonify({'success': True, **crane}), 200
+    except Exception:
+        app.logger.exception('update_file_label failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
 @app.route("/api/cranes/<crane_id>/files/<int:file_id>", methods=['DELETE'])
 @limiter.limit("30 per minute")
 def delete_crane_file(crane_id, file_id):

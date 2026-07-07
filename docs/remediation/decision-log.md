@@ -257,3 +257,19 @@ Each entry records a decision made during the programme, the reasoning, and cons
 **Migration:** `_migrate_from_specs()` runs once on import — each `specs` row → one crane + one primary file, its flat `uploads/<slug>.pdf` moving into `uploads/<slug>/`. Idempotent (skips existing cranes); renames `specs` → `specs_legacy` so it never re-runs and the old rows survive for rollback. Verified against a synthesised v1.0.1-shaped DB (file moved, `specs_legacy` retained, second boot inert).
 
 **Consequences:** `GET /api/pdfs` items are now cranes (each with `files[]`, `url`=primary, `name`=id, `file_count`); the pagination cursor is a crane id. New routes: `POST /api/cranes/<id>/files`, `PUT /api/cranes/<id>/primary`, `DELETE /api/cranes/<id>/files/<file_id>`. Audit gains `file_add`/`primary_change`/`file_remove` event types. Health now counts `files` rows. 21 tests added/updated (56 backend + 9 E2E, all green); two new E2E tests drive the strip (switch, set-primary, delete) in a real browser. Ships as a minor version (new feature, backward-compatible via automatic migration).
+
+---
+
+## DL-022 — Multi-file polish (editable labels, drag-to-add) + in-PDF find
+
+**Date:** 2026-07-07
+**Finding:** F-002, F-003 (new features following DL-021's multi-file model)
+
+**Decisions:**
+1. **Editable file labels (F-002a).** New `PATCH /api/cranes/<id>/files/<file_id>` updates `files.label`; the strip chip gains a ✎ action that opens the metadata modal in a new `editlabel` mode (label field only). Chose modal reuse over inline-edit for consistency with the existing accessible-dialog pattern (R-015) — no new focus-management surface.
+2. **Drag-to-add-to-crane (F-002b).** A PDF dropped while a crane is open now routes to `addfile` mode targeted at that crane, rather than always starting a new crane. The modal names the crane and offers a "Create a new crane instead" link that switches to `upload` carrying the same pending file — so the default is low-friction but never traps the user. Nothing commits until submit, so the "guess" is safe.
+3. **In-PDF find (F-003).** Implemented as a self-contained overlay rather than wiring PDF.js's `PDFFindController`/viewer components (which assume the `pdf_viewer` module, not this bespoke canvas renderer). `getTextContent()` per page builds a lazy cache; matches are item-level (a text run/cell containing the query); highlights are `<div>`s positioned in **%** of the page inside a `#pdf-highlights` overlay, computed from the item transform × render viewport. Percentages (not px) keep highlights aligned when `max-width:100%` scales the canvas. Verified visually: highlights land exactly on the matching lines/cells.
+
+**Rationale (find):** The daily task is reading a dense load chart, so "jump to the value" is the high-value viewer feature. Item-level highlighting is a deliberate MVP tradeoff — sub-word highlighting needs per-glyph geometry (a full text layer), but in real charts each cell is its own text item, so item-level already highlights individual cells. A dedicated `state.findToken` guards the async cross-page scan against a file switch mid-scan (mirrors `openToken`/`renderToken`).
+
+**Consequences:** `#pdf-canvas` is now wrapped in `#pdf-stage` (position:relative) alongside `#pdf-highlights`. New E2E: `TestFind` (drives search → 2 matches, next, 0/0 miss, with real extractable text via `_make_text_pdf`) and `TestMultiFileUI::test_rename_file_label`. `Ctrl/Cmd+F` is intercepted only while a document is open. Audit gains a `label_edit` event. 59 backend + 11 E2E tests, all green. Ships as v1.2.0.

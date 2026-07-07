@@ -76,6 +76,7 @@ const state = {
     pendingFile: null,          // file pending in upload modal
     renderToken: 0,
     openToken: 0,               // monotonic — aborts stale openFile() calls
+    findToken: 0,               // monotonic — aborts a stale in-PDF find scan
     submitToken: 0,             // monotonic — guards submit-button label restoration
     theme: 'dark',
 };
@@ -205,6 +206,15 @@ const api = {
             body: JSON.stringify({ file_id: fileId }),
         });
         if (!r.ok) throw new Error((await safeErr(r)) || 'Could not set main file');
+        return r.json();
+    },
+    async updateFileLabel(craneId, fileId, label) {
+        const r = await fetch(`/api/cranes/${encodeURIComponent(craneId)}/files/${fileId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+            body: JSON.stringify({ label }),
+        });
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Could not rename file');
         return r.json();
     },
     async deleteFile(craneId, fileId) {
@@ -442,13 +452,18 @@ const metadataModal = (() => {
     const elGrid      = $('#metadata-grid');
     const elLabelField= $('#label-field');
     const elLabel     = $('#label-input');
+    const elNewCrane  = $('#addfile-newcrane');
     const elMake      = $('#make-input');
     const elType      = $('#type-input');
     const elModel     = $('#model-input');
     const elCapacity  = $('#capacity-input');
 
+    // File currently being renamed (editlabel mode).
+    let editFileId = null;
+
     function reset() {
         state.pendingFile = null;
+        editFileId = null;
         elFileInput.value = '';
         elPickerTxt.textContent = 'Click to choose a PDF';
         elMake.value = elType.value = elModel.value = elCapacity.value = '';
@@ -463,6 +478,7 @@ const metadataModal = (() => {
         elSubmit.classList.remove('btn--loading');
         elSubmit.disabled = false;
         elMode.value = mode;
+        elNewCrane.hidden = true;   // only shown in addfile mode
     }
 
     function openUpload(file) {
@@ -494,7 +510,7 @@ const metadataModal = (() => {
         modal.open('metadata-modal', { focus: '#make-input' });
     }
 
-    function openAddFile(crane) {
+    function openAddFile(crane, file) {
         prep('addfile');
         elCraneId.value = crane.id;
         elTitle.textContent = `Add file to ${(crane.make || '')} ${(crane.model || '')}`.trim() || 'Add file';
@@ -502,7 +518,22 @@ const metadataModal = (() => {
         elFileField.hidden = false;
         elGrid.hidden = true;       // no make/type/model/capacity — inherited from the crane
         elLabelField.hidden = false;
-        modal.open('metadata-modal', { focus: '#file-picker' });
+        elNewCrane.hidden = false;  // escape hatch: this file is really a new crane
+        if (file) setPendingFile(file);
+        modal.open('metadata-modal', { focus: file ? '#label-input' : '#file-picker' });
+    }
+
+    function openEditLabel(crane, file) {
+        prep('editlabel');
+        elCraneId.value = crane.id;
+        editFileId = file.id;
+        elLabel.value = file.label || '';
+        elTitle.textContent = 'Rename file';
+        elSubmit.textContent = 'Save';
+        elFileField.hidden = true;
+        elGrid.hidden = true;
+        elLabelField.hidden = false;
+        modal.open('metadata-modal', { focus: '#label-input' });
     }
 
     function setPendingFile(file) {
@@ -561,6 +592,19 @@ const metadataModal = (() => {
         }
     }
 
+    async function submitEditLabel() {
+        const craneId = elCraneId.value;
+        const updated = await api.updateFileLabel(craneId, editFileId, elLabel.value.trim());
+        modal.close('metadata-modal');
+        toast.success('File renamed');
+        if (state.current && state.current.id === craneId) viewer.applyLabelEdit(updated);
+        else await sidebar.loadFileList();
+    }
+
+    // "Create a new crane instead" — switch an add-file flow into a fresh upload,
+    // carrying whatever file was already chosen.
+    elNewCrane.addEventListener('click', () => openUpload(state.pendingFile || undefined));
+
     $('#metadata-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const mode = elMode.value;
@@ -598,9 +642,10 @@ const metadataModal = (() => {
         const submittedMode = mode;
         const submittedToken = ++state.submitToken;
         try {
-            if (mode === 'upload')       await submitUpload(fields);
-            else if (mode === 'addfile') await submitAddFile();
-            else                         await submitEdit(fields);
+            if (mode === 'upload')         await submitUpload(fields);
+            else if (mode === 'addfile')   await submitAddFile();
+            else if (mode === 'editlabel') await submitEditLabel();
+            else                           await submitEdit(fields);
         } catch (err) {
             toast.danger('Action failed', err.message || String(err));
         } finally {
@@ -610,12 +655,13 @@ const metadataModal = (() => {
                 elSubmit.classList.remove('btn--loading');
                 elSubmit.textContent = submittedMode === 'upload' ? 'Upload'
                                      : submittedMode === 'addfile' ? 'Add file'
+                                     : submittedMode === 'editlabel' ? 'Save'
                                      : 'Save changes';
             }
         }
     });
 
-    return { openUpload, openEdit, openAddFile, setPendingFile };
+    return { openUpload, openEdit, openAddFile, openEditLabel, setPendingFile };
 })();
 
 /* =========================================================
@@ -750,7 +796,11 @@ const dropzone = (() => {
                 toast.warning('Close the open dialog first', 'Then drop the PDF to start a new upload.');
                 return;
             }
-            metadataModal.openUpload(file);
+            // If a crane is open, assume the drop is a supplementary file for it
+            // (the modal names the crane and offers "new crane instead"). Otherwise
+            // it's a brand-new crane.
+            if (state.current) metadataModal.openAddFile(state.current, file);
+            else metadataModal.openUpload(file);
         });
     }
     return { init, show, hide };
@@ -1248,6 +1298,7 @@ const viewer = {
             }, 120);
         });
 
+        this.initFind();
         this.openEmpty();
     },
 
@@ -1266,6 +1317,8 @@ const viewer = {
         $('#pdf-viewer').hidden = true;
         $('#toolbar').hidden = true;
         $$('.model-item.is-active').forEach(el => el.classList.remove('is-active'));
+        this.closeFind();
+        this._resetFind();
         this.refreshEmptyCopy();
         updateTitle(null);
     },
@@ -1315,6 +1368,7 @@ const viewer = {
         $('#toolbar').hidden = false;
         $('#viewer-skeleton').hidden = false;
         this._markActiveChip(file.id);
+        this._resetFind();   // per-page text cache belongs to the old document
 
         // Free the previous document before loading the next one.
         if (state.pdfDoc && typeof state.pdfDoc.destroy === 'function') {
@@ -1336,6 +1390,8 @@ const viewer = {
             $('#page-input').value = 1;
             $('#page-total').textContent = doc.numPages;
             await this.renderPage(1);
+            // If find is open, re-run the query against the newly-loaded document.
+            if (this._find.active && this._find.query) this._runFind(this._find.query);
         } catch (err) {
             if (token !== state.openToken) return;
             $('#viewer-skeleton').hidden = true;
@@ -1386,6 +1442,14 @@ const viewer = {
             star.innerHTML = '<svg class="icon"><use href="#icon-check-circle-2"/></svg>';
             star.addEventListener('click', (e) => { e.stopPropagation(); this._setPrimary(file); });
 
+            const edit = document.createElement('button');
+            edit.type = 'button';
+            edit.className = 'file-chip__action file-chip__action--edit';
+            edit.title = 'Rename this file';
+            edit.setAttribute('aria-label', 'Rename ' + this._fileLabel(file));
+            edit.innerHTML = '<svg class="icon"><use href="#icon-edit-3"/></svg>';
+            edit.addEventListener('click', (e) => { e.stopPropagation(); this._editLabel(file); });
+
             const del = document.createElement('button');
             del.type = 'button';
             del.className = 'file-chip__action file-chip__action--delete';
@@ -1396,6 +1460,7 @@ const viewer = {
 
             chip.appendChild(open);
             chip.appendChild(star);
+            chip.appendChild(edit);
             chip.appendChild(del);
             chips.appendChild(chip);
         }
@@ -1466,6 +1531,17 @@ const viewer = {
         }
     },
 
+    _editLabel(file) {
+        if (!state.current) return;
+        metadataModal.openEditLabel(state.current, file);
+    },
+
+    // Called by the label-edit modal on success.
+    applyLabelEdit(updatedCrane) {
+        this._applyCrane(updatedCrane);
+        sidebar.loadFileList();
+    },
+
     async renderPage(num) {
         if (!state.pdfDoc) return;
         num = Math.max(1, Math.min(num, state.pageCount));
@@ -1513,6 +1589,12 @@ const viewer = {
             $('#zoom-level').textContent = Math.round(scale * 100) + '%';
             $('#prev-page').disabled = num <= 1;
             $('#next-page').disabled = num >= state.pageCount;
+
+            // Feature 2: keep the find overlay aligned to whatever just rendered.
+            this._renderViewport = viewport;
+            this._renderPageNum = num;
+            if (this._find.active && this._find.query) this._drawHighlights();
+            else this._clearHighlights();
         } catch (err) {
             if (token === state.renderToken) {
                 $('#viewer-skeleton').hidden = true;
@@ -1585,6 +1667,174 @@ const viewer = {
         // R-018: defer removal so browsers have time to initiate the download
         // before the anchor is detached from the DOM.
         setTimeout(() => a.remove(), 150);
+    },
+
+    /* ---- Feature 2: in-document find --------------------------------------- */
+    _find: { active: false, query: '', matches: [], current: -1, pageText: {} },
+
+    initFind() {
+        const input = $('#find-input');
+        $('#find-btn').addEventListener('click', () => this.openFind());
+        $('#find-close').addEventListener('click', () => this.closeFind());
+        $('#find-next').addEventListener('click', () => this._gotoMatch(+1));
+        $('#find-prev').addEventListener('click', () => this._gotoMatch(-1));
+
+        let t;
+        input.addEventListener('input', () => {
+            clearTimeout(t);
+            t = setTimeout(() => this._runFind(input.value), 180);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); this._gotoMatch(e.shiftKey ? -1 : +1); }
+            else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.closeFind(); }
+        });
+
+        // Ctrl/Cmd+F opens find when a document is open (overrides browser find);
+        // "/" opens it too when the user isn't typing in a field.
+        window.addEventListener('keydown', (e) => {
+            const mod = e.ctrlKey || e.metaKey;
+            if (mod && (e.key === 'f' || e.key === 'F') && state.pdfDoc) {
+                e.preventDefault();
+                this.openFind();
+            } else if (e.key === '/' && state.pdfDoc && !this._find.active
+                       && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || ''))) {
+                e.preventDefault();
+                this.openFind();
+            }
+        });
+    },
+
+    openFind() {
+        // Opens even while the document is still loading; _loadPdf re-runs the query
+        // once the doc is ready, and _runFind is a no-op without state.pdfDoc.
+        this._find.active = true;
+        $('#find-bar').hidden = false;
+        const input = $('#find-input');
+        input.focus();
+        input.select();
+        if (input.value.trim() && state.pdfDoc) this._runFind(input.value);
+    },
+
+    closeFind() {
+        this._find.active = false;
+        $('#find-bar').hidden = true;
+        this._clearHighlights();
+    },
+
+    _resetFind() {
+        // New document loaded — drop the per-page text cache and matches.
+        this._find.matches = [];
+        this._find.current = -1;
+        this._find.pageText = {};
+        this._clearHighlights();
+        $('#find-count').textContent = '';
+        $('#find-prev').disabled = true;
+        $('#find-next').disabled = true;
+    },
+
+    _clearHighlights() {
+        const box = $('#pdf-highlights');
+        if (box) box.innerHTML = '';
+    },
+
+    async _pageItems(pageNum) {
+        if (!this._find.pageText[pageNum]) {
+            const page = await state.pdfDoc.getPage(pageNum);
+            const tc = await page.getTextContent();
+            this._find.pageText[pageNum] = (tc.items || []).filter(i => typeof i.str === 'string' && i.str);
+        }
+        return this._find.pageText[pageNum];
+    },
+
+    async _runFind(raw) {
+        const q = (raw || '').trim().toLowerCase();
+        this._find.query = q;
+        if (!state.pdfDoc || !q) {
+            this._find.matches = [];
+            this._find.current = -1;
+            this._clearHighlights();
+            $('#find-count').textContent = q ? '' : '';
+            $('#find-prev').disabled = true;
+            $('#find-next').disabled = true;
+            return;
+        }
+        const token = ++state.findToken;
+        const matches = [];
+        for (let p = 1; p <= state.pageCount; p++) {
+            const items = await this._pageItems(p);
+            if (token !== state.findToken) return;   // superseded by a newer query/scan
+            items.forEach((it, idx) => {
+                if (it.str.toLowerCase().includes(q)) matches.push({ page: p, itemIndex: idx });
+            });
+        }
+        this._find.matches = matches;
+        const has = matches.length > 0;
+        $('#find-prev').disabled = !has;
+        $('#find-next').disabled = !has;
+        if (!has) {
+            this._find.current = -1;
+            $('#find-count').textContent = '0/0';
+            this._clearHighlights();
+            return;
+        }
+        // Jump to the first match at or after the current page for a natural feel.
+        let start = matches.findIndex(m => m.page >= state.pageNum);
+        if (start < 0) start = 0;
+        this._find.current = start;
+        this._goToCurrent();
+    },
+
+    _gotoMatch(delta) {
+        const n = this._find.matches.length;
+        if (!n) return;
+        this._find.current = (this._find.current + delta + n) % n;
+        this._goToCurrent();
+    },
+
+    _goToCurrent() {
+        const m = this._find.matches[this._find.current];
+        if (!m) return;
+        $('#find-count').textContent = `${this._find.current + 1}/${this._find.matches.length}`;
+        if (m.page !== state.pageNum) {
+            this.renderPage(m.page);   // async; _drawHighlights runs after it renders
+        } else {
+            this._drawHighlights();
+        }
+    },
+
+    _drawHighlights() {
+        const box = $('#pdf-highlights');
+        const vp = this._renderViewport;
+        const pageNum = this._renderPageNum;
+        if (!box || !vp || !this._find.active) return;
+        box.innerHTML = '';
+        const items = this._find.pageText[pageNum];
+        if (!items) return;
+        const current = this._find.matches[this._find.current];
+        let currentEl = null;
+        this._find.matches.forEach((match) => {
+            if (match.page !== pageNum) return;
+            const it = items[match.itemIndex];
+            if (!it) return;
+            const t = it.transform, v = vp.transform;
+            const a = v[0] * t[0] + v[2] * t[1];
+            const b = v[1] * t[0] + v[3] * t[1];
+            const c = v[0] * t[2] + v[2] * t[3];
+            const d = v[1] * t[2] + v[3] * t[3];
+            const e = v[0] * t[4] + v[2] * t[5] + v[4];
+            const f = v[1] * t[4] + v[3] * t[5] + v[5];
+            const fontH = Math.hypot(b, d);
+            const w = it.width * vp.scale;
+            const el = document.createElement('div');
+            el.className = 'pdf-highlight';
+            el.style.left = (e / vp.width) * 100 + '%';
+            el.style.top = ((f - fontH) / vp.height) * 100 + '%';
+            el.style.width = (w / vp.width) * 100 + '%';
+            el.style.height = (fontH / vp.height) * 100 + '%';
+            if (match === current) { el.classList.add('is-current'); currentEl = el; }
+            box.appendChild(el);
+        });
+        if (currentEl) currentEl.scrollIntoView({ block: 'center', inline: 'center' });
     },
 };
 

@@ -901,6 +901,17 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
 /* Optional-field hint in the metadata modal (add-file label). */
 .form-field__hint { color: var(--fg-tertiary); font-weight: 400; }
 
+/* "Create a new crane instead" escape link in the add-file modal. */
+.modal__textlink {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 2px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+}
+.modal__textlink:hover { text-decoration: underline; }
+
 /* Canvas well */
 .viewer__well {
     flex: 1;
@@ -920,6 +931,15 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     background-position: 0 0;
 }
 
+/* Stage tightly wraps the canvas so the highlight overlay (inset:0) maps exactly
+   onto the rendered page, scaling with it when max-width shrinks the canvas. */
+.pdf-stage {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+    max-width: 100%;
+}
+
 #pdf-canvas {
     background: #ffffff;
     box-shadow: var(--shadow-lg);
@@ -928,6 +948,68 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
     max-width: 100%;
     height: auto;
 }
+
+/* Feature 2: in-PDF find highlight overlay. Boxes are positioned in % of the page
+   so they track the canvas under any CSS scaling. */
+.pdf-highlights {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    border-radius: 2px;
+}
+.pdf-highlight {
+    position: absolute;
+    background: rgba(245, 158, 11, 0.32);
+    border-radius: 1px;
+}
+.pdf-highlight.is-current {
+    background: rgba(245, 158, 11, 0.55);
+    outline: 1.5px solid var(--accent);
+}
+
+.find-bar {
+    position: absolute;
+    top: 10px;
+    right: 16px;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 6px 5px 10px;
+    background: var(--bg-surface-raised);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+}
+.find-bar .icon--muted { width: 15px; height: 15px; }
+#find-input {
+    width: 180px;
+    max-width: 40vw;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    padding: 2px 4px;
+}
+.find-bar__count {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    font-variant-numeric: tabular-nums;
+    min-width: 34px;
+    text-align: right;
+    white-space: nowrap;
+}
+.find-bar__btn {
+    display: inline-grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-sm);
+    color: var(--fg-secondary);
+}
+.find-bar__btn .icon { width: 15px; height: 15px; }
+.find-bar__btn:hover:not(:disabled) { background: var(--bg-surface-sunken); color: var(--fg-primary); }
+.find-bar__btn:disabled { opacity: 0.4; cursor: default; }
 
 .viewer__skeleton {
     position: absolute;

@@ -42,8 +42,43 @@ def _csrf_token(page: Page) -> str:
     raise RuntimeError('crane_csrf cookie not found — call page.goto() first')
 
 
+def _make_text_pdf(lines) -> str:
+    """Build a minimal single-page PDF (Helvetica) whose text PDF.js can extract,
+    one text item per line. Returns base64. Used by the in-PDF find test."""
+    def esc(s):
+        return s.replace('\\', r'\\').replace('(', r'\(').replace(')', r'\)')
+    show = "BT /F1 24 Tf 40 150 Td "
+    for i, ln in enumerate(lines):
+        if i:
+            show += "0 -40 Td "
+        show += f"({esc(ln)}) Tj "
+    show += "ET"
+    stream = show.encode('latin-1')
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += str(i).encode() + b" 0 obj\n" + body + b"\nendobj\n"
+    xref_pos = len(out)
+    n = len(objs) + 1
+    out += b"xref\n0 " + str(n).encode() + b"\n0000000000 65535 f \n"
+    for off in offsets:
+        out += ("%010d 00000 n \n" % off).encode()
+    out += b"trailer\n<< /Size " + str(n).encode() + b" /Root 1 0 R >>\nstartxref\n"
+    out += str(xref_pos).encode() + b"\n%%EOF\n"
+    return base64.b64encode(bytes(out)).decode()
+
+
 def _api_upload(page: Page, base_url: str, *, make: str, model_type: str,
-                model: str, capacity: str) -> dict:
+                model: str, capacity: str, pdf_b64: str = _PDF_B64) -> dict:
     """Upload a PDF via the API from within the browser context (bypasses drag-drop
     for test setup) and return the parsed JSON response."""
     csrf = _csrf_token(page)
@@ -64,7 +99,7 @@ def _api_upload(page: Page, base_url: str, *, make: str, model_type: str,
             });
             return r.json();
         }''',
-        [base_url, csrf, make, model_type, model, capacity, _PDF_B64],
+        [base_url, csrf, make, model_type, model, capacity, pdf_b64],
     )
 
 
@@ -355,3 +390,68 @@ class TestMultiFileUI:
         expect(page.locator('.file-chip')).to_have_count(1, timeout=5000)
         pdfs = page.request.get(f'{live_server}/api/pdfs').json()['items']
         assert any(c['id'] == crane_id for c in pdfs)
+
+    def test_rename_file_label(self, page: Page, live_server: str):
+        """Feature 1a: the chip's edit action renames a file's label."""
+        page.goto(live_server)
+        result = _api_upload(page, live_server, make='Renamer', model_type='Crawler',
+                             model='RN1', capacity='90t')
+        crane_id = result['id']
+        _api_add_file(page, live_server, crane_id, label='Old label')
+
+        page.reload()
+        page.wait_for_load_state('networkidle')
+        page.locator('.make-item').filter(has_text='Renamer').click()
+        row = page.locator(f'.model-item[data-filename="{crane_id}"]')
+        expect(row).to_be_visible(timeout=5000)
+        row.locator('.model-item__body').click()
+
+        chip = page.locator('.file-chip').filter(has_text='Old label')
+        expect(chip).to_have_count(1)
+        chip.locator('.file-chip__action--edit').click()
+
+        expect(page.locator('#metadata-modal')).to_be_visible(timeout=3000)
+        page.locator('#label-input').fill('New label')
+        page.locator('#form-submit-btn').click()
+        expect(page.locator('#metadata-modal')).not_to_be_visible(timeout=5000)
+
+        expect(page.locator('.file-chip').filter(has_text='New label')).to_have_count(1)
+        expect(page.locator('.file-chip').filter(has_text='Old label')).to_have_count(0)
+
+
+class TestFind:
+    def test_in_pdf_find_highlights_and_navigates(self, page: Page, live_server: str):
+        """Feature 2: search inside the open PDF — count, highlights, and next/prev."""
+        pdf_b64 = _make_text_pdf(['Load chart 250t', 'Max radius 250t'])
+        page.goto(live_server)
+        result = _api_upload(page, live_server, make='FindCo', model_type='Mobile',
+                             model='FX1', capacity='250t', pdf_b64=pdf_b64)
+        assert result.get('success'), f'upload failed: {result}'
+
+        page.reload()
+        page.wait_for_load_state('networkidle')
+        page.locator('.make-item').filter(has_text='FindCo').click()
+        row = page.locator(f'.model-item[data-filename="{result["id"]}"]')
+        expect(row).to_be_visible(timeout=5000)
+        row.locator('.model-item__body').click()
+        expect(page.locator('#pdf-canvas')).to_be_visible(timeout=5000)
+        # Wait for the document to finish loading (page-total is set post-load).
+        expect(page.locator('#page-total')).to_have_text('1', timeout=5000)
+
+        # Open the find bar and search a term present on both lines.
+        page.locator('#find-btn').click()
+        expect(page.locator('#find-bar')).to_be_visible()
+        page.locator('#find-input').fill('250t')
+
+        expect(page.locator('#find-count')).to_have_text('1/2', timeout=5000)
+        expect(page.locator('.pdf-highlight')).to_have_count(2)
+        expect(page.locator('.pdf-highlight.is-current')).to_have_count(1)
+
+        # Next advances the counter.
+        page.locator('#find-next').click()
+        expect(page.locator('#find-count')).to_have_text('2/2')
+
+        # A miss reports 0/0 and clears highlights.
+        page.locator('#find-input').fill('zzzznotfound')
+        expect(page.locator('#find-count')).to_have_text('0/0', timeout=5000)
+        expect(page.locator('.pdf-highlight')).to_have_count(0)
