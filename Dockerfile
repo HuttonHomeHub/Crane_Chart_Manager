@@ -1,4 +1,7 @@
-FROM python:3.12-slim
+# SEC-DEP-03: base image pinned by digest for reproducible, drift-free builds.
+# Digest is python:3.12-slim (captured 2026-07-08); refresh with:
+#   docker pull python:3.12-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
+FROM python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
 
 RUN useradd --create-home --shell /bin/bash crane
 
@@ -27,7 +30,7 @@ ARG CRANE_VERSION=dev
 ENV CRANE_VERSION=$CRANE_VERSION
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)"
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 

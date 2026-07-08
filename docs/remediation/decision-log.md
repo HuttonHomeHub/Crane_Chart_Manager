@@ -1,7 +1,7 @@
 # Decision Log
 
 Crane Charts — living record of significant design decisions.  
-Last updated: 2026-07-08 (v1.8.0)
+Last updated: 2026-07-08 (remediation programme, Session 1)
 
 `DL-001`–`DL-020` cover the 2026-07-06 engineering remediation (see [README.md](README.md));
 `DL-021` onward cover the post-1.0 features (multi-file cranes, in-PDF find, bulk import,
@@ -492,3 +492,36 @@ Backups card gains per-backup **Restore** + **Upload & restore**; `confirmDialog
 merge/Merge", not always "Delete"). 87 backend + 24 E2E (8 new backend covering by-name/upload/
 safety-backup/disk-presence/bad-name/invalid-zip/no-db/CSRF; 1 new E2E driving the UI restore).
 Ships as v1.8.0.
+
+## DL-031 — Remediation programme kickoff + Cycle 1 (security/ops quick wins)
+
+**Date:** 2026-07-08
+**Context:** A full engineering audit (Phases 2–9) produced ~30 findings. Converted into a
+living remediation programme (`backlog.md`, `master-plan.md`, `progress-report.md`, plus this
+log and the risk register), 38 backlog items across P1–P8.
+
+**Decisions:**
+1. **Sequence by P-band, but pull security/dependency CI guardrails forward.** The audit judged
+   these highest-leverage (nothing automatically caught a bad dependency). Vindicated instantly:
+   adding `pip-audit` surfaced **Flask CVE-2026-27205**, fixed same cycle (3.1.1→3.1.3).
+2. **Do NOT enable foreign keys yet (REM-DATA-01), despite it being a P1 integrity item.**
+   Impact analysis showed a naive FK breaks the crane-rename path (`UPDATE cranes SET id=…`
+   while `files.crane_id` still points at the old id) and existing DBs need a table rebuild to
+   acquire the constraint. It is reclassified `IN_ANALYSIS`, now dependent on the connection-layer
+   refactor (REM-MAINT-03) + `ON UPDATE/DELETE CASCADE` + a migration. This deferral *is* the
+   programme working — analyse impact before acting.
+3. **Split runtime vs dev dependencies.** `pip-audit` prompted noticing that pytest/playwright
+   were being installed into the runtime image via `requirements.txt`. Now `requirements.txt`
+   (runtime) + `requirements-dev.txt` (test/lint/audit) — smaller image, smaller attack surface.
+4. **Enforce only ruff's default rules for now.** Expanding to import-sort/bugbear/pyupgrade and
+   `ruff format` would rewrite the whole tree (incl. a real `raise…from` fix) — noisy churn that
+   would bury the substantive work. Logged as REM-MAINT-06 for a focused pass.
+5. **Coverage gate at 80%** (measured 82.48% on unit/integration) — real headroom, not aspirational.
+6. **Base image pinned by a verified digest**, not a fabricated one (captured via `docker inspect`);
+   refresh command documented inline; Dependabot `docker` ecosystem keeps it current.
+7. **Debugger opt-in, CSP `object-src 'none'`, healthcheck timeout, backup-scheduler health** —
+   low-risk hardening, each with a test or verified config.
+
+**Consequences:** 88 backend + 24 E2E green; coverage 82.48%; ruff + pip-audit clean. 12 items
+VALIDATED, 7 ACCEPTED_RISK, 2 SUPERSEDED, 17 open. Full state in `backlog.md`; per-session delta
+in `progress-report.md`. No app behaviour changed for end users (all hardening/infra).

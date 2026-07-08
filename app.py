@@ -121,6 +121,7 @@ def _csp_header(resp):
         f"font-src 'self' {fonts_files}; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
+        "object-src 'none'; "  # REM-SEC-04: no <object>/<embed> (PDF.js renders to canvas)
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'"
@@ -159,6 +160,11 @@ BACKUP_PREFIX = 'crane-backup-'
 # Zip-bomb guard for restore: refuse an archive whose uncompressed contents exceed
 # this. Generous default (a large catalogue is legitimately big); env-overridable.
 MAX_RESTORE_UNCOMPRESSED = int(os.environ.get('CRANE_MAX_RESTORE_MB', '4096')) * 1024 * 1024
+
+# REM-OPS-03: backup-scheduler health. A silently-failing scheduler was previously
+# invisible (errors only hit stdout). We record the last run's outcome so /api/backup
+# (and the Settings panel) can surface "last scheduled backup failed".
+_backup_health = {'last_success_at': None, 'last_error_at': None, 'last_error': None}
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -590,6 +596,7 @@ def create_backup():
     zip_path = os.path.join(BACKUP_DIR, f'{BACKUP_PREFIX}{stamp}.zip')
     with metadata_lock():
         _write_backup_zip(zip_path)
+    _backup_health['last_success_at'] = datetime.now().isoformat()
     _prune_backups()
     return zip_path
 
@@ -742,8 +749,10 @@ def _backup_scheduler():
         try:
             path = create_backup()
             app.logger.info('backup written: %s', path)
-        except Exception:
+        except Exception as e:
             app.logger.exception('scheduled backup failed')
+            _backup_health['last_error_at'] = datetime.now().isoformat()
+            _backup_health['last_error'] = str(e)
         time.sleep(BACKUP_INTERVAL_HOURS * 3600)
 
 
@@ -1224,6 +1233,9 @@ def backup_status():
             'count': len(backups),
             'latest': backups[0] if backups else None,
             'backups': backups,
+            # REM-OPS-03: expose scheduler health so a silently-failing nightly
+            # backup is visible in the Settings panel, not just the container logs.
+            'scheduler_health': _backup_health,
         }), 200
     except Exception:
         app.logger.exception('backup_status failed')
@@ -1387,4 +1399,8 @@ _migrate_from_specs()  # single-file specs -> multi-file cranes/files
 start_backup_scheduler()  # RR-010: periodic full backups (no-op if CRANE_BACKUP_ENABLED=0)
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # REM-SEC-03: the Werkzeug debugger is an RCE vector if ever bound publicly, so it
+    # is opt-in (CRANE_DEBUG=1) rather than on by default. Production uses gunicorn and
+    # never touches this branch; `make dev` sets CRANE_DEBUG for local reloading.
+    debug = os.environ.get('CRANE_DEBUG', '0') == '1'
+    app.run(debug=debug, host='0.0.0.0', port=5000)

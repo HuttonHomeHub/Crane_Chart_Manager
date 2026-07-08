@@ -1,0 +1,22 @@
+# REM-SEC-02: automated dependency + action + base-image update PRs, so a fix like
+# the Flask CVE-2026-27205 bump lands proactively instead of being caught late by audit.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"

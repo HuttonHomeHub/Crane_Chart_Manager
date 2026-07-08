@@ -5,12 +5,10 @@ the golden path through the browser UI. They complement the unit/integration
 tests in tests/test_app.py which cover validation edge-cases and concurrency.
 """
 import base64
-import json
 import os
 import re
 import sqlite3
 
-import pytest
 from playwright.sync_api import Page, expect
 
 import app as app_module

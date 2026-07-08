@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 flask --debug run              # dev server on :5000 with auto-reload
-pytest tests/                  # full suite (unit + integration; 87 tests, ~1.3s)
+pytest tests/                  # full suite (unit + integration; 88 tests, ~1.3s)
 pytest tests/e2e/              # Playwright E2E suite (24 tests; requires Chromium)
+pip install -r requirements-dev.txt   # test/lint/audit tooling (not in the runtime image)
+ruff check app.py static tests        # lint gate (CI); pip-audit -r requirements.txt --strict
 pytest tests/test_app.py::TestClassName::test_name -v   # single test
 python -m playwright install chromium   # install browser once after pip install
 ```

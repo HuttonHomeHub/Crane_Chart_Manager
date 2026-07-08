@@ -58,6 +58,7 @@ class TestCsrfAndCookies:
         assert "default-src 'self'" in csp
         assert "frame-ancestors 'none'" in csp
         assert "form-action 'self'" in csp
+        assert "object-src 'none'" in csp   # REM-SEC-04
         # The CSP nonce should also appear on both inline <script> tags.
         nonce = csp.split("'nonce-", 1)[1].split("'", 1)[0]
         assert f'nonce="{nonce}"' in r.get_data(as_text=True)
@@ -261,8 +262,10 @@ class TestMetadataPersistence:
                 errors.append((i, repr(e)))
 
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(N)]
-        for t in threads: t.start()
-        for t in threads: t.join(timeout=10)
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
         assert not errors, f'worker errors: {errors}'
         stored = app_module.list_cranes()
         assert len(stored) == N, f'expected {N} cranes, got {len(stored)}'
@@ -426,7 +429,6 @@ class TestDeleteFileLock:
         app_module.limiter.reset()
 
         # Phase 2: concurrently upload N new files and delete the N victims.
-        new_names = [f'new_{i}' for i in range(N)]
         errors = []
 
         def do_upload(i):
@@ -590,7 +592,8 @@ class TestBackup:
 
     def test_backup_snapshot_is_readable_sqlite(self, app, client, csrf):
         """The DB inside the backup is a valid, queryable SQLite snapshot."""
-        import zipfile, tempfile
+        import zipfile
+        import tempfile
         upload(client, csrf, make='Snap', model='SX1', capacity='9t')
         path = app_module.create_backup()
         with zipfile.ZipFile(path) as z:
@@ -630,6 +633,16 @@ class TestBackup:
         for key in ('enabled', 'dir', 'interval_hours', 'keep', 'include_uploads', 'count', 'backups'):
             assert key in r.json
 
+    def test_backup_status_reports_scheduler_health(self, client, csrf):
+        """REM-OPS-03: /api/backup surfaces scheduler health, and a successful backup
+        records last_success_at so a silently-failing scheduler is visible."""
+        r = client.get('/api/backup')
+        health = r.json['scheduler_health']
+        assert set(health) == {'last_success_at', 'last_error_at', 'last_error'}
+        client.post('/api/backup', headers=_hdrs(csrf))
+        health = client.get('/api/backup').json['scheduler_health']
+        assert health['last_success_at'] is not None
+
     def test_backup_now_creates_a_backup(self, client, csrf):
         r = client.post('/api/backup', headers=_hdrs(csrf))
         assert r.status_code == 201
@@ -642,7 +655,8 @@ class TestBackup:
         assert client.post('/api/backup').status_code == 403
 
     def test_backup_download_streams_zip(self, client, csrf):
-        import io, zipfile
+        import io
+        import zipfile
         upload(client, csrf)
         r = client.get('/api/backup/download')
         assert r.status_code == 200
