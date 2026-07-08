@@ -4,6 +4,12 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.8.1 — palette styling polish
+- The **command palette** (Ctrl/Cmd+K) now matches the upload/settings dialogs: same 14px corner
+  radius, same header/footer padding rhythm, and a canvas-tinted hint bar. The search field no
+  longer shows a stray focus-ring "box" (the global `:focus-visible` ring is suppressed there,
+  as the palette itself is the focus context).
+
 ## v1.8.0 — backup restore
 - **Restore from a backup** — the Backups card in Settings now has a **Restore** button on each
   listed backup, and an **Upload & restore** control for an external zip (disaster recovery onto a
