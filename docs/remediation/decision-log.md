@@ -1,7 +1,7 @@
 # Decision Log
 
 Crane Charts — living record of significant design decisions.  
-Last updated: 2026-07-08 (v1.7.0)
+Last updated: 2026-07-08 (v1.8.0)
 
 `DL-001`–`DL-020` cover the 2026-07-06 engineering remediation (see [README.md](README.md));
 `DL-021` onward cover the post-1.0 features (multi-file cranes, in-PDF find, bulk import,
@@ -453,3 +453,42 @@ Ships as v1.5.0.
 LINKS` JS region; `#palette-modal` + Settings "Merge manufacturers" card + two `<datalist>`s.
 79 backend + 21 E2E (4 new backend: facets + merge rename/absorb/validation; 3 new E2E: palette
 jump+capacity, deep-link-on-load, merge flow). Ships as v1.7.0.
+
+## DL-030 — Backup restore: reversible, validate-before-swap, atomic on one filesystem
+
+**Date:** 2026-07-08
+**Finding:** F-011 (v1.5.0 shipped backups but no way to *use* one — restore meant a manual
+container-stop + unzip + file swap; an untested/unusable backup is a false safety net)
+
+**Decisions:**
+1. **Validate before touching live data.** The archive is fully vetted *first* — arcnames are
+   rejected if absolute or containing `..` (traversal), uncompressed size is capped
+   (`CRANE_MAX_RESTORE_MB`, default 4096) against zip bombs, and the extracted DB must open as
+   SQLite with the expected `cranes`/`files` tables. A bad upload returns 400 with the live
+   catalogue **untouched** (test: `test_restore_zip_without_db_rejected`).
+2. **Every restore is reversible.** Before swapping, a labelled `…-prerestore.zip` safety backup
+   of the *current* state is written. So the single most destructive action in the app can always
+   be undone — restore the pre-restore backup. This is what makes exposing restore in the UI
+   acceptable.
+3. **Atomic-as-possible swap, DB last.** Under `metadata_lock()` (serialised with every other
+   mutation), uploads are swapped first via `os.rename`, then the DB via `os.replace` — the DB is
+   the source of truth, so it flips last and atomically. The staging dir is created *beside*
+   `DB_FILE` so the replace is same-filesystem (not a cross-device `EXDEV`). Stale `-wal`/`-shm`
+   sidecars are deleted so SQLite can't replay an old WAL onto the new DB.
+4. **Two input modes, upload is trusted least.** Restore-by-name (`{name}`) only accepts an
+   app-created backup already in `BACKUP_DIR` (pattern-validated) — the common "roll back a
+   mistake" path. Upload-a-zip is the disaster-recovery path (fresh instance, empty `BACKUP_DIR`);
+   it's subject to the global `MAX_CONTENT_LENGTH`, with the documented escape hatch of dropping a
+   huge zip into `BACKUP_DIR` and restoring by name. Both inherit CSRF + the tinyauth gate + rate
+   limiting; no new auth surface.
+5. **Audit into the restored DB.** The `restore` event is logged *after* the swap so it lands in
+   the now-current database — the restored catalogue carries a record that it was restored, and
+   from what. (Logging before would be overwritten by the swap.)
+
+**Consequences:** New route `POST /api/backup/restore`; helpers `_restore_from_zip`,
+`_classify_backup_members`, `_validate_restore_db`; config `MAX_RESTORE_UNCOMPRESSED`. Settings
+Backups card gains per-backup **Restore** + **Upload & restore**; `confirmDialog()` gained optional
+`{title, confirmLabel}` (so the shared dialog reads "Confirm restore/Restore" and "Confirm
+merge/Merge", not always "Delete"). 87 backend + 24 E2E (8 new backend covering by-name/upload/
+safety-backup/disk-presence/bad-name/invalid-zip/no-db/CSRF; 1 new E2E driving the UI restore).
+Ships as v1.8.0.

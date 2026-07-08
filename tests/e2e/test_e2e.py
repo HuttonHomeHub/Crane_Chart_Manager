@@ -661,6 +661,31 @@ class TestSettingsPanel:
             page.locator('#settings-backup-download').click()
         assert dl2.value.suggested_filename.endswith('.zip')
 
+    def test_restore_reverts_post_backup_changes(self, page: Page, live_server: str):
+        """Back up, add a crane, then restore via the UI: the post-backup crane is gone,
+        the pre-backup one remains, and the sidebar updates live."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Zrestorepre', model_type='Mobile', model='RPRE1', capacity='20t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        page.locator('#settings-btn').click()
+        expect(page.locator('#settings-modal')).to_be_visible(timeout=3000)
+        page.locator('#settings-backup-now').click()
+        expect(page.locator('.settings__backup-restore').first).to_be_visible(timeout=5000)
+
+        # Diverge from the snapshot: add a crane the backup doesn't contain.
+        _api_upload(page, live_server, make='Zrestorepost', model_type='Mobile', model='RPOST1', capacity='30t')
+
+        # Restore the newest backup and confirm the destructive action.
+        page.locator('.settings__backup-restore').first.click()
+        expect(page.locator('#confirm-title')).to_have_text('Confirm restore')
+        page.locator('#confirm-ok').click()
+
+        # The post-backup crane is gone; the pre-backup one survives.
+        expect(page.locator('.make-item[data-make="Zrestorepost"]')).to_have_count(0, timeout=8000)
+        expect(page.locator('.make-item[data-make="Zrestorepre"]')).to_have_count(1)
+
 
 class TestPaletteAndDeepLinks:
     def test_command_palette_jump_and_capacity(self, page: Page, live_server: str):

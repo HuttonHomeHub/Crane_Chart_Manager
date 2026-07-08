@@ -361,6 +361,15 @@
                         </button>
                     </div>
                     <ul class="settings__backups" id="settings-backup-list" aria-label="Existing backups"></ul>
+                    <div class="settings__restore">
+                        <p class="settings__note">Restore replaces the whole catalogue with a backup —
+                           a safety backup of the current data is taken first.</p>
+                        <label class="btn btn--ghost btn--sm settings__restore-upload">
+                            <svg class="icon"><use href="#icon-upload-cloud"/></svg><span>Upload &amp; restore…</span>
+                            <input type="file" id="settings-restore-upload" accept=".zip"
+                                   aria-label="Upload a backup zip to restore" hidden>
+                        </label>
+                    </div>
                 </section>
 
                 <section class="settings__card">

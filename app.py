@@ -156,6 +156,9 @@ BACKUP_ENABLED = os.environ.get('CRANE_BACKUP_ENABLED', '1') != '0'
 # snapshots (a TrueNAS/ZFS share), so zipping the PDFs into every backup is redundant.
 BACKUP_INCLUDE_UPLOADS = os.environ.get('CRANE_BACKUP_INCLUDE_UPLOADS', '1') != '0'
 BACKUP_PREFIX = 'crane-backup-'
+# Zip-bomb guard for restore: refuse an archive whose uncompressed contents exceed
+# this. Generous default (a large catalogue is legitimately big); env-overridable.
+MAX_RESTORE_UNCOMPRESSED = int(os.environ.get('CRANE_MAX_RESTORE_MB', '4096')) * 1024 * 1024
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -615,6 +618,120 @@ def _prune_backups():
             os.remove(os.path.join(BACKUP_DIR, old['name']))
         except OSError:
             app.logger.warning('could not prune backup %s', old['name'])
+
+
+def _classify_backup_members(zf):
+    """Classify a backup zip's members, rejecting path traversal / absolute paths and
+    guarding against a zip bomb. Returns (db_member, [upload_members]); raises
+    ValueError if the archive is unsafe or has no database."""
+    db_member = None
+    upload_members = []
+    total = 0
+    for info in zf.infolist():
+        name = info.filename
+        if name.endswith('/'):
+            continue  # directory entry
+        # Reject anything that would escape the extraction root.
+        norm = os.path.normpath(name)
+        if os.path.isabs(name) or norm.startswith('..') or '..' in norm.split(os.sep) \
+                or norm.startswith('/'):
+            raise ValueError(f'unsafe path in backup: {name}')
+        total += info.file_size
+        if total > MAX_RESTORE_UNCOMPRESSED:
+            raise ValueError('backup is too large to restore')
+        if '/' not in name and name.endswith('.db'):
+            db_member = name
+        elif name.startswith('uploads/'):
+            upload_members.append(name)
+        # Unknown members are ignored (forward-compat), not extracted.
+    if not db_member:
+        raise ValueError('backup contains no database')
+    return db_member, upload_members
+
+
+def _validate_restore_db(path):
+    """Confirm an extracted DB is a real SQLite file with the expected tables."""
+    try:
+        with sqlite3.connect(path) as conn:
+            names = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+    except sqlite3.DatabaseError:
+        raise ValueError('backup database is not a valid SQLite file')
+    if 'cranes' not in names or 'files' not in names:
+        raise ValueError('backup database is missing expected tables')
+
+
+def _restore_from_zip(zip_path):
+    """Replace the live catalogue (DB + uploads) with a backup zip's contents.
+
+    Safety model: (1) validate the archive and its DB *before* touching live data;
+    (2) take a labelled pre-restore backup so the restore is itself reversible;
+    (3) swap under metadata_lock() — uploads first, then the DB last (the DB is the
+    source of truth), each via os.replace/os.rename on the same filesystem so the
+    switch is atomic. Stale WAL/SHM sidecars are dropped so SQLite can't apply an old
+    WAL to the new DB. Returns a summary dict. Raises ValueError on a bad archive."""
+    db_dir = os.path.dirname(os.path.abspath(DB_FILE)) or '.'
+    os.makedirs(db_dir, exist_ok=True)
+    # Stage on the same filesystem as the DB so os.replace is atomic (not cross-device).
+    staging = tempfile.mkdtemp(prefix='crane-restore-', dir=db_dir)
+    old_uploads = None
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            if zf.testzip() is not None:
+                raise ValueError('backup archive is corrupt')
+            db_member, upload_members = _classify_backup_members(zf)
+            staged_db = os.path.join(staging, 'crane.db')
+            with zf.open(db_member) as src, open(staged_db, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+            _validate_restore_db(staged_db)
+
+            has_uploads = bool(upload_members)
+            staged_uploads = os.path.join(staging, 'uploads')
+            for name in upload_members:
+                rel = name[len('uploads/'):]
+                dest = os.path.join(staged_uploads, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(name) as src, open(dest, 'wb') as dst:
+                    shutil.copyfileobj(src, dst)
+
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+        with metadata_lock():
+            # 1. Pre-restore safety backup of the current state.
+            os.makedirs(BACKUP_DIR, exist_ok=True)
+            safety = os.path.join(BACKUP_DIR, f'{BACKUP_PREFIX}{stamp}-prerestore.zip')
+            _write_backup_zip(safety)
+
+            # 2. Swap uploads (only if the archive carried an uploads tree).
+            if has_uploads:
+                up_abs = os.path.abspath(UPLOAD_FOLDER)
+                os.makedirs(os.path.dirname(up_abs) or '.', exist_ok=True)
+                old_uploads = f'{up_abs}.old-{stamp}'
+                if os.path.exists(up_abs):
+                    os.rename(up_abs, old_uploads)
+                try:
+                    os.rename(staged_uploads, up_abs)
+                except Exception:
+                    # Roll the old uploads dir back into place before surfacing.
+                    if old_uploads and os.path.exists(old_uploads) and not os.path.exists(up_abs):
+                        os.rename(old_uploads, up_abs)
+                        old_uploads = None
+                    raise
+
+            # 3. Swap the DB atomically and drop stale WAL/SHM sidecars.
+            os.replace(staged_db, DB_FILE)
+            for sidecar in (f'{DB_FILE}-wal', f'{DB_FILE}-shm'):
+                if os.path.exists(sidecar):
+                    os.remove(sidecar)
+
+        if old_uploads and os.path.exists(old_uploads):
+            shutil.rmtree(old_uploads, ignore_errors=True)
+        with sqlite3.connect(DB_FILE) as conn:
+            cranes = conn.execute('SELECT COUNT(*) FROM cranes').fetchone()[0]
+        _prune_backups()
+        return {'cranes': cranes, 'restored_uploads': has_uploads,
+                'safety_backup': os.path.basename(safety)}
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _backup_scheduler():
@@ -1166,6 +1283,60 @@ def backup_download_file(name):
         return send_from_directory(BACKUP_DIR, name, as_attachment=True)
     except NotFound:
         return jsonify({'error': 'Not found'}), 404
+
+@app.route("/api/backup/restore", methods=['POST'])
+@limiter.limit(lambda: app.config['WRITE_RATE'])
+def backup_restore():
+    """Replace the current catalogue (DB + uploads) with a backup. Two modes:
+    JSON {name} restores an existing backup from BACKUP_DIR; a multipart 'file'
+    restores an uploaded zip. A pre-restore safety backup is always taken first, so
+    the operation is reversible. Destructive — guarded by CSRF + the tinyauth gate."""
+    tmp_upload = None
+    try:
+        name = (request.get_json(silent=True) or {}).get('name') if request.is_json \
+            else request.form.get('name')
+
+        if name:
+            # Restore an existing (app-created, trusted) backup by name.
+            if '/' in name or '\\' in name or \
+                    not (name.startswith(BACKUP_PREFIX) and name.endswith('.zip')):
+                return jsonify({'error': 'Invalid backup name'}), 400
+            zip_path = os.path.join(BACKUP_DIR, name)
+            if not os.path.isfile(zip_path):
+                return jsonify({'error': 'Backup not found'}), 404
+            source_label = name
+        else:
+            # Restore an uploaded zip (disaster recovery onto a fresh instance).
+            up = request.files.get('file')
+            if not up or not up.filename:
+                return jsonify({'error': 'No backup provided'}), 400
+            if not up.filename.lower().endswith('.zip'):
+                return jsonify({'error': 'Backup must be a .zip archive'}), 400
+            fd, tmp_upload = tempfile.mkstemp(suffix='.zip')
+            os.close(fd)
+            up.save(tmp_upload)
+            zip_path = tmp_upload
+            source_label = up.filename
+
+        if not zipfile.is_zipfile(zip_path):
+            return jsonify({'error': 'Not a valid zip archive'}), 400
+
+        summary = _restore_from_zip(zip_path)
+        # Log into the NOW-CURRENT db (post-swap) so the restored catalogue records
+        # that it was restored, and from what.
+        log_event('restore', '(restore)', before=None,
+                  after={'source': source_label, **summary})
+        app.logger.info('catalogue restored from %s (%d cranes)',
+                        source_label, summary.get('cranes', -1))
+        return jsonify({'success': True, **summary}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception:
+        app.logger.exception('backup_restore failed')
+        return jsonify({'error': 'Internal server error'}), 500
+    finally:
+        if tmp_upload and os.path.exists(tmp_upload):
+            os.remove(tmp_upload)
 
 @app.route("/api/info", methods=['GET'])
 def instance_info():
