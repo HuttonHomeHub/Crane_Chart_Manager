@@ -277,6 +277,12 @@ function parseCapacity(s) {
     return m ? parseFloat(m[1]) : null;
 }
 
+// Natural (numeric-aware) sort, so "LTM1750" comes before "LTM11200" — matching
+// Windows Explorer's StrCmpLogicalW — rather than pure lexicographic order where
+// "LTM11200" wins on the second digit. Used for makes, types, and model names.
+const _naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const naturalCompare = (a, b) => _naturalCollator.compare(a || '', b || '');
+
 async function safeErr(r) {
     try { return (await r.json()).error; } catch (_) { return null; }
 }
@@ -1273,7 +1279,7 @@ const sidebar = {
             const make = f.make || 'Unknown';
             (grouped[make] = grouped[make] || []).push(f);
         }
-        const makes = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+        const makes = Object.keys(grouped).sort(naturalCompare);
         $('#makes-count').textContent = String(makes.length);
 
         // Per-make searchable text (all its cranes' fields + file labels) so a search
@@ -1350,7 +1356,7 @@ const sidebar = {
             const t = f.type || 'Other';
             (grouped[t] = grouped[t] || []).push(f);
         }
-        const types = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+        const types = Object.keys(grouped).sort(naturalCompare);
         $('#models-count').textContent = String(files.length);
 
         // R-017: flatten into a render queue (type headers + rows) instead of building
@@ -1361,7 +1367,7 @@ const sidebar = {
         for (const type of types) {
             queue.push({ kind: 'header', text: type, count: grouped[type].length });
             const models = grouped[type].slice().sort((a, b) =>
-                (a.model || '').localeCompare(b.model || '')
+                naturalCompare(a.model, b.model)
             );
             for (const file of models) queue.push({ kind: 'row', file, typeKey: type });
         }

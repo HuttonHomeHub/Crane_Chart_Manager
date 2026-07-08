@@ -4,6 +4,11 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.7.2 — natural sort order
+- Sidebar makes and models now sort **numeric-aware** like Windows Explorer, so `LTM1750`
+  comes before `LTM11200` instead of `LTM11200` sorting first (pure alphabetical order
+  compared the second digit `1` < `7`).
+
 ## v1.7.1 — sidebar make search fix
 - Searching a **manufacturer name** in the sidebar now jumps to that make and lists its
   models, instead of showing the make but hiding every model. (Model rows carry no make name,

@@ -613,6 +613,23 @@ class TestSidebarUX:
         expect(page.locator('.make-item').filter(has_text='Zjumpalpha')).to_be_hidden()
         expect(page.locator('.model-item').filter(has_text='JB1')).to_be_visible()
 
+    def test_models_sort_naturally_not_lexicographically(self, page: Page, live_server: str):
+        """Model rows sort numeric-aware (like Windows Explorer): LTM1750 before
+        LTM11200, not the pure-alphabetical order where 11200 wins on the 2nd digit."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Znatsort', model_type='All Terrain', model='LTM11200-9.1', capacity='1200t')
+        _api_upload(page, live_server, make='Znatsort', model_type='All Terrain', model='LTM1750-9.1', capacity='750t')
+        _api_upload(page, live_server, make='Znatsort', model_type='All Terrain', model='LTM1300-6.2', capacity='300t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        page.locator('.make-item').filter(has_text='Znatsort').click()
+        rows = page.locator('.type-group').filter(has_text='All Terrain').locator('.model-item')
+        expect(rows).to_have_count(3, timeout=5000)
+        order = [rows.nth(i).inner_text() for i in range(3)]
+        models = [t.split('\n')[0].strip() for t in order]
+        assert models == ['LTM1300-6.2', 'LTM1750-9.1', 'LTM11200-9.1'], models
+
 
 class TestSettingsPanel:
     def test_settings_backup_flow_and_info(self, page: Page, live_server: str):
