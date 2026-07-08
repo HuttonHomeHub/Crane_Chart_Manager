@@ -664,6 +664,106 @@ class TestBackup:
         assert client.get('/api/backup/download/crane-backup-nope.zip').status_code == 404
 
 
+class TestRestore:
+    def test_restore_by_name_replaces_catalogue(self, app, client, csrf):
+        """Restoring a backup brings back the cranes it held and drops any added since."""
+        upload(client, csrf, make='Keepco', model='KX1', capacity='50t')
+        name = client.post('/api/backup', headers=_hdrs(csrf)).json['name']
+        # Diverge from the snapshot: add another crane, delete the original.
+        upload(client, csrf, make='Laterco', model='LX9', capacity='80t')
+        first = client.get('/api/pdfs').json['items']
+        keepco = next(c for c in first if c['make'] == 'Keepco')
+        client.delete(f"/api/delete/{keepco['id']}", headers=_hdrs(csrf))
+
+        r = client.post('/api/backup/restore', json={'name': name}, headers=_hdrs(csrf))
+        assert r.status_code == 200, r.json
+        assert r.json['success'] is True
+        makes = {c['make'] for c in client.get('/api/pdfs').json['items']}
+        assert makes == {'Keepco'}          # snapshot restored
+        assert 'Laterco' not in makes        # post-snapshot change dropped
+
+    def test_restore_takes_pre_restore_safety_backup(self, app, client, csrf):
+        """Restore snapshots the current state first, so it's reversible."""
+        upload(client, csrf, make='Preco', model='PX1', capacity='10t')
+        name = client.post('/api/backup', headers=_hdrs(csrf)).json['name']
+        before = len(app_module.list_backups())
+        r = client.post('/api/backup/restore', json={'name': name}, headers=_hdrs(csrf))
+        assert r.status_code == 200
+        after = app_module.list_backups()
+        assert len(after) == before + 1
+        assert any('prerestore' in b['name'] for b in after)
+        assert r.json['safety_backup'].endswith('.zip')
+
+    def test_restore_uploaded_zip(self, app, client, csrf):
+        """A freshly-downloaded backup zip can be uploaded back to restore."""
+        upload(client, csrf, make='Roundtrip', model='RT1', capacity='75t')
+        zip_bytes = client.get('/api/backup/download').data
+        # Wipe the catalogue, then restore from the uploaded zip.
+        for c in client.get('/api/pdfs').json['items']:
+            client.delete(f"/api/delete/{c['id']}", headers=_hdrs(csrf))
+        assert client.get('/api/pdfs').json['items'] == []
+
+        r = client.post(
+            '/api/backup/restore',
+            data={'file': (io.BytesIO(zip_bytes), 'crane-backup-x.zip')},
+            headers=_hdrs(csrf),
+            content_type='multipart/form-data',
+        )
+        assert r.status_code == 200, r.json
+        makes = {c['make'] for c in client.get('/api/pdfs').json['items']}
+        assert 'Roundtrip' in makes
+
+    def test_restore_files_are_present_on_disk(self, app, client, csrf):
+        """After restore, the crane's PDF actually exists under uploads/ again."""
+        crane = upload(client, csrf, make='Diskco', model='DK1', capacity='30t').json
+        name = client.post('/api/backup', headers=_hdrs(csrf)).json['name']
+        # Delete the crane (removes its dir), then restore.
+        client.delete(f"/api/delete/{crane['id']}", headers=_hdrs(csrf))
+        client.post('/api/backup/restore', json={'name': name}, headers=_hdrs(csrf))
+        stored = crane['files'][0]['stored_name']
+        path = os.path.join(app_module.UPLOAD_FOLDER, crane['id'], stored)
+        assert os.path.exists(path)
+
+    def test_restore_bad_name_rejected(self, client, csrf):
+        assert client.post('/api/backup/restore', json={'name': 'evil.txt'},
+                           headers=_hdrs(csrf)).status_code == 400
+        assert client.post('/api/backup/restore', json={'name': '../crane-backup-x.zip'},
+                           headers=_hdrs(csrf)).status_code == 400
+        assert client.post('/api/backup/restore', json={'name': 'crane-backup-missing.zip'},
+                           headers=_hdrs(csrf)).status_code == 404
+
+    def test_restore_invalid_zip_rejected(self, client, csrf):
+        r = client.post(
+            '/api/backup/restore',
+            data={'file': (io.BytesIO(b'not a zip'), 'crane-backup-x.zip')},
+            headers=_hdrs(csrf),
+            content_type='multipart/form-data',
+        )
+        assert r.status_code == 400
+
+    def test_restore_zip_without_db_rejected(self, app, client, csrf):
+        """A zip that carries no database is refused before any live data is touched."""
+        import zipfile
+        upload(client, csrf, make='Guardco', model='GX1', capacity='40t')
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as z:
+            z.writestr('uploads/foo/bar.pdf', b'%PDF-1.4')
+        buf.seek(0)
+        r = client.post(
+            '/api/backup/restore',
+            data={'file': (buf, 'crane-backup-x.zip')},
+            headers=_hdrs(csrf),
+            content_type='multipart/form-data',
+        )
+        assert r.status_code == 400
+        # Live catalogue untouched.
+        assert {c['make'] for c in client.get('/api/pdfs').json['items']} == {'Guardco'}
+
+    def test_restore_requires_csrf(self, client):
+        client.get('/')  # mint cookie
+        assert client.post('/api/backup/restore', json={'name': 'crane-backup-x.zip'}).status_code == 403
+
+
 class TestFacetsAndMerge:
     def test_facets_returns_distinct(self, client, csrf):
         upload(client, csrf, make='Liebherr', type_='Mobile', model='LTM1', capacity='90t')

@@ -1564,8 +1564,24 @@ dialog.modal::backdrop {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.settings__backup-name { flex: 1 1 auto; min-width: 0; }
 .settings__backup-name:hover { color: var(--accent); text-decoration: underline; }
 .settings__backup-size { flex-shrink: 0; font-size: 11px; color: var(--fg-tertiary); font-variant-numeric: tabular-nums; }
+.settings__backup-restore {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-tertiary);
+    cursor: pointer;
+    transition: border-color .12s, color .12s;
+}
+.settings__backup-restore:hover,
+.settings__backup-restore:focus-visible { border-color: var(--accent); color: var(--accent); }
+.settings__restore { margin-top: var(--space-3); }
+.settings__restore-upload { position: relative; margin-top: var(--space-2); }
 
 .settings__info {
     display: grid;

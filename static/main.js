@@ -255,6 +255,24 @@ const api = {
         if (!r.ok) throw new Error((await safeErr(r)) || 'Backup failed');
         return r.json();
     },
+    async restoreBackup(name) {
+        const r = await fetch('/api/backup/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+            body: JSON.stringify({ name }),
+        });
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Restore failed');
+        return r.json();
+    },
+    async restoreUpload(file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const r = await fetch('/api/backup/restore', {
+            method: 'POST', headers: { 'X-CSRF-Token': csrfToken() }, body: fd,
+        });
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Restore failed');
+        return r.json();
+    },
     async facets() {
         const r = await fetch('/api/facets');
         if (!r.ok) throw new Error((await safeErr(r)) || 'Could not load facets');
@@ -467,17 +485,24 @@ const modal = (() => {
    ========================================================= */
 // Replaces window.confirm() — keyboard-accessible, themeable, works in
 // fullscreen (top layer), never blocked by pop-up blockers.
-function confirmDialog(message) {
+function confirmDialog(message, { title = 'Confirm deletion', confirmLabel = 'Delete' } = {}) {
     return new Promise((resolve) => {
         const dlg = document.getElementById('confirm-modal');
         document.getElementById('confirm-message').textContent = message;
+        const titleEl   = document.getElementById('confirm-title');
         const okBtn     = document.getElementById('confirm-ok');
         const cancelBtn = document.getElementById('confirm-cancel');
+        const prevTitle = titleEl.textContent;
+        const prevLabel = okBtn.textContent;
+        titleEl.textContent = title;
+        okBtn.textContent = confirmLabel;
 
         function cleanup(result) {
             okBtn.removeEventListener('click', onOk);
             cancelBtn.removeEventListener('click', onCancel);
             dlg.removeEventListener('cancel', onNativeCancel);
+            titleEl.textContent = prevTitle;   // restore defaults for the next caller
+            okBtn.textContent = prevLabel;
             modal.close('confirm-modal');
             resolve(result);
         }
@@ -2330,8 +2355,15 @@ const settings = (() => {
                 const size = document.createElement('span');
                 size.className = 'settings__backup-size';
                 size.textContent = fmtBytes(b.size);
+                const restoreBtn = document.createElement('button');
+                restoreBtn.type = 'button';
+                restoreBtn.className = 'settings__backup-restore';
+                restoreBtn.textContent = 'Restore';
+                restoreBtn.title = 'Replace the current catalogue with this backup';
+                restoreBtn.addEventListener('click', () => restoreFrom(b.name));
                 li.appendChild(a);
                 li.appendChild(size);
+                li.appendChild(restoreBtn);
                 list.appendChild(li);
             }
         }
@@ -2369,11 +2401,43 @@ const settings = (() => {
         }
     }
 
+    // Shared restore flow: confirm (destructive!), run, report, reload the catalogue.
+    async function runRestore(label, fn) {
+        const ok = await confirmDialog(
+            `Restore from ${label}?\n\nThis REPLACES all current cranes and files with the ` +
+            `contents of the backup. A safety backup of the current state is taken first, ` +
+            `so this can be undone. Continue?`,
+            { title: 'Confirm restore', confirmLabel: 'Restore' });
+        if (!ok) return;
+        try {
+            const res = await fn();
+            toast.success('Catalogue restored',
+                `${res.cranes} crane${res.cranes === 1 ? '' : 's'} restored. ` +
+                `Safety backup: ${res.safety_backup}`);
+            await sidebar.loadFileList();
+            refreshFacets();
+            const [status, info] = await Promise.all([api.backupStatus(), api.instanceInfo()]);
+            render(status, info);
+        } catch (err) {
+            toast.danger('Restore failed', err.message || String(err));
+        }
+    }
+
+    function restoreFrom(name) {
+        return runRestore(`"${name.replace(/^crane-backup-/, '').replace(/\.zip$/, '')}"`,
+            () => api.restoreBackup(name));
+    }
+
     $('#settings-btn').addEventListener('click', open);
     $('#settings-backup-now').addEventListener('click', backupNow);
     $('#settings-backup-download').addEventListener('click', () => {
         toast.info('Preparing backup', 'Your download will start shortly.');
         triggerDownload('/api/backup/download');
+    });
+    $('#settings-restore-upload').addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';   // allow re-selecting the same file later
+        if (file) runRestore(`the uploaded file "${file.name}"`, () => api.restoreUpload(file));
     });
 
     return { open };
@@ -2545,7 +2609,8 @@ $('#merge-btn').addEventListener('click', async () => {
     const status = $('#merge-status');
     if (!from || !into) { status.textContent = 'Pick both manufacturers.'; return; }
     if (from === into) { status.textContent = 'Pick two different manufacturers.'; return; }
-    const ok = await confirmDialog(`Move all "${from}" cranes onto "${into}"? This can't be undone.`);
+    const ok = await confirmDialog(`Move all "${from}" cranes onto "${into}"? This can't be undone.`,
+        { title: 'Confirm merge', confirmLabel: 'Merge' });
     if (!ok) return;
     status.textContent = 'Merging…';
     try {

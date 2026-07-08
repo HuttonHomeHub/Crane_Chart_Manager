@@ -97,14 +97,17 @@ to work (the CSRF cookie's `Secure` flag and rate-limit keying depend on it).
 | `CRANE_BACKUP_KEEP` | `7` | How many backups to retain |
 | `CRANE_BACKUP_ENABLED` | `1` | Set `0` to disable the backup scheduler |
 | `CRANE_BACKUP_INCLUDE_UPLOADS` | `1` | Set `0` for DB-only backups (when PDFs live on snapshotting storage) |
+| `CRANE_MAX_RESTORE_MB` | `4096` | Max uncompressed size of a restore archive (zip-bomb guard) |
 
-### Backups
+### Backups & restore
 
 The app writes periodic **full backups** — a consistent `crane.db` snapshot plus a zip of
 `uploads/` — to `CRANE_BACKUP_DIR`, pruned to `CRANE_BACKUP_KEEP`. The **Settings** panel (the
-app-bar gear) shows backup status, a "Back up now" button, and a downloadable list of existing
-backups (plus read-only instance info). Restore by unzipping into the data directory
-(`crane.db` and `uploads/` sit at the zip root).
+app-bar gear) shows backup status, a "Back up now" button, and a list of existing backups you can
+download or **Restore** in place — plus an **Upload & restore** control to recover from a
+downloaded zip on a fresh instance. A restore replaces the whole catalogue (database + PDFs) and
+first takes a `…-prerestore.zip` safety backup, so it's reversible. (You can still restore by hand
+if you prefer — `crane.db` and `uploads/` sit at the zip root.)
 
 For real safety, point `CRANE_BACKUP_DIR` at a **separate mount** (e.g. a NAS share) so a
 single-disk failure doesn't take the backups with it:

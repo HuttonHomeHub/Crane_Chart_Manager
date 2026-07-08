@@ -4,6 +4,20 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.8.0 — backup restore
+- **Restore from a backup** — the Backups card in Settings now has a **Restore** button on each
+  listed backup, and an **Upload & restore** control for an external zip (disaster recovery onto a
+  fresh instance). Restore replaces the whole catalogue (database + PDFs) with the backup's
+  contents. This completes the backup loop — previously you could make backups but only restore
+  by hand.
+- **Reversible** — every restore first takes a labelled `…-prerestore.zip` safety backup of the
+  current state, so an accidental restore can be undone.
+- **Safe** — the archive and its database are validated *before* any live data is touched
+  (path-traversal/zip-bomb guards, SQLite integrity check); the swap runs under the metadata lock,
+  uploads first then the database last, atomically on the same filesystem.
+- New: `POST /api/backup/restore` (by-name or uploaded zip). `CRANE_MAX_RESTORE_MB` (default 4096)
+  caps a restore archive's uncompressed size. (DL-030)
+
 ## v1.7.2 — natural sort order
 - Sidebar makes and models now sort **numeric-aware** like Windows Explorer, so `LTM1750`
   comes before `LTM11200` instead of `LTM11200` sorting first (pure alphabetical order
