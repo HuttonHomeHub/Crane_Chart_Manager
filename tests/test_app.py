@@ -664,6 +664,43 @@ class TestBackup:
         assert client.get('/api/backup/download/crane-backup-nope.zip').status_code == 404
 
 
+class TestFacetsAndMerge:
+    def test_facets_returns_distinct(self, client, csrf):
+        upload(client, csrf, make='Liebherr', type_='Mobile', model='LTM1', capacity='90t')
+        upload(client, csrf, make='Liebherr', type_='Crawler', model='LR1', capacity='60t')
+        upload(client, csrf, make='Tadano', type_='Mobile', model='AC1', capacity='50t')
+        r = client.get('/api/facets')
+        assert r.status_code == 200
+        assert r.json['makes'] == ['Liebherr', 'Tadano']
+        assert set(r.json['types']) == {'Mobile', 'Crawler'}
+
+    def test_merge_renames_when_no_collision(self, client, csrf):
+        typo = upload(client, csrf, make='Liebherri', type_='Mobile', model='LTM1', capacity='90t').json
+        r = client.post('/api/merge-make', json={'from': 'Liebherri', 'into': 'Liebherr'}, headers=_hdrs(csrf))
+        assert r.status_code == 200
+        assert r.json['moved'] == 1 and r.json['absorbed'] == 0
+        assert app_module.get_crane(typo['id']) is None                       # old slug gone
+        merged = app_module.get_crane('liebherr_mobile_ltm1_90t')
+        assert merged is not None and merged['make'] == 'Liebherr'
+        assert 'Liebherri' not in client.get('/api/facets').json['makes']
+
+    def test_merge_absorbs_on_collision(self, client, csrf):
+        # Same crane exists under both spellings — files should merge into the target.
+        good = upload(client, csrf, make='Liebherr', type_='Mobile', model='LTM1', capacity='90t').json
+        upload(client, csrf, make='Liebherri', type_='Mobile', model='LTM1', capacity='90t')
+        r = client.post('/api/merge-make', json={'from': 'Liebherri', 'into': 'Liebherr'}, headers=_hdrs(csrf))
+        assert r.status_code == 200
+        assert r.json['absorbed'] == 1
+        target = app_module.get_crane(good['id'])
+        assert target['file_count'] == 2                                       # both files now here
+        assert app_module.get_crane('liebherri_mobile_ltm1_90t') is None
+
+    def test_merge_validation(self, client, csrf):
+        assert client.post('/api/merge-make', json={'from': 'A', 'into': 'A'}, headers=_hdrs(csrf)).status_code == 400
+        assert client.post('/api/merge-make', json={'from': '', 'into': 'B'}, headers=_hdrs(csrf)).status_code == 400
+        assert client.post('/api/merge-make', json={'from': 'Nope', 'into': 'B'}, headers=_hdrs(csrf)).status_code == 404
+
+
 class TestInstanceInfo:
     def test_info_endpoint(self, client, csrf):
         upload(client, csrf)

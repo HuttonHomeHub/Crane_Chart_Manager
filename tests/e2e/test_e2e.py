@@ -623,3 +623,67 @@ class TestSettingsPanel:
         with page.expect_download() as dl2:
             page.locator('#settings-backup-download').click()
         assert dl2.value.suggested_filename.endswith('.zip')
+
+
+class TestPaletteAndDeepLinks:
+    def test_command_palette_jump_and_capacity(self, page: Page, live_server: str):
+        """Ctrl+K opens the palette; text jumps to a crane, a ≥N query filters by capacity.
+        Uses unique tokens so the cumulative E2E session DB doesn't skew the assertions."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Zpalette', model_type='Mobile', model='ZZLOW22', capacity='22t')
+        _api_upload(page, live_server, make='Zpalette', model_type='Mobile', model='ZZHIGH900', capacity='900t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        page.keyboard.press('Control+k')
+        expect(page.locator('#palette-modal')).to_be_visible(timeout=3000)
+        inp = page.locator('#palette-input')
+
+        # A unique token narrows to exactly one crane.
+        inp.fill('ZZHIGH900')
+        expect(page.locator('.palette__result')).to_have_count(1)
+
+        # Capacity range (same palette session): ≥800t includes 900t, excludes 22t.
+        inp.fill('>=800')
+        expect(page.locator('.palette__result').filter(has_text='ZZHIGH900')).to_have_count(1)
+        expect(page.locator('.palette__result').filter(has_text='ZZLOW22')).to_have_count(0)
+
+        # Enter on the unique token opens the crane and updates the URL.
+        inp.fill('ZZHIGH900')
+        inp.press('Enter')
+        expect(page.locator('#palette-modal')).not_to_be_visible()
+        expect(page).to_have_url(re.compile(r'#crane/zpalette_mobile_zzhigh900_900t'))
+
+    def test_deep_link_opens_crane_on_load(self, page: Page, live_server: str):
+        """Visiting /#crane/<id> opens that crane after the catalogue loads."""
+        page.goto(live_server)
+        result = _api_upload(page, live_server, make='Deepco', model_type='Mobile', model='DL1', capacity='75t')
+        cid = result['id']
+        # Force a full load with the hash present (goto to a same-doc hash won't reload).
+        page.goto('about:blank')
+        page.goto(f'{live_server}/#crane/{cid}')
+        page.wait_for_load_state('networkidle')
+        # The crane's model row is active and the info bar shows it.
+        expect(page.locator(f'.model-item[data-filename="{cid}"]')).to_have_class(re.compile(r'is-active'), timeout=5000)
+        expect(page.locator('#info-model')).to_have_text('DL1')
+
+    def test_merge_manufacturers(self, page: Page, live_server: str):
+        """The Settings merge tool moves a typo'd manufacturer onto the correct one."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Mergecorrect', model_type='Mobile', model='MC1', capacity='40t')
+        _api_upload(page, live_server, make='Mergetypo', model_type='Mobile', model='MT1', capacity='50t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        page.locator('#settings-btn').click()
+        expect(page.locator('#settings-modal')).to_be_visible(timeout=3000)
+        page.locator('#merge-from').select_option('Mergetypo')
+        page.locator('#merge-into').select_option('Mergecorrect')
+        page.locator('#merge-btn').click()
+        # confirm dialog
+        expect(page.locator('#confirm-modal')).to_be_visible(timeout=3000)
+        page.locator('#confirm-ok').click()
+
+        expect(page.locator('#merge-status')).to_contain_text('Merged', timeout=5000)
+        makes = {m['make'] for m in page.request.get(f'{live_server}/api/pdfs').json()['items']}
+        assert 'Mergetypo' not in makes and 'Mergecorrect' in makes
