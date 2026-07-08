@@ -1,0 +1,32 @@
+# REM-OPS-02: reference deployment for Crane Charts.
+# The published image has no hardcoded data path — point CRANE_UPLOAD_DIR/CRANE_DB at a
+# single mounted /config dir to match this stack's convention. See CLAUDE.md.
+#
+# Security note (RR-001): the app has NO built-in authentication. It MUST sit behind an
+# authenticating reverse proxy (e.g. nginx + tinyauth). Do not expose port 5000 directly.
+services:
+  crane-charts:
+    image: ghcr.io/huttonhomehub/crane-charts:latest   # pin to a version tag in production
+    container_name: crane-charts
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      # Set to 1 ONLY when behind a single reverse-proxy hop that sets X-Forwarded-*.
+      - CRANE_TRUST_PROXY=1
+      - CRANE_UPLOAD_DIR=/config/uploads
+      - CRANE_DB=/config/crane.db
+      # Backups (RR-010). Point CRANE_BACKUP_DIR at a *separate* mount for off-host copies.
+      - CRANE_BACKUP_DIR=/config/backups
+      # - CRANE_BACKUP_INTERVAL_HOURS=24
+      # - CRANE_BACKUP_KEEP=7
+      # - CRANE_BACKUP_INCLUDE_UPLOADS=1   # 0 = DB-only (when uploads/ is on snapshotting storage)
+      # - CRANE_MAX_UPLOAD_MB=500
+    volumes:
+      - /apps/crane-charts/config:/config
+    # No published ports here on purpose — attach to the proxy's network instead, e.g.:
+    # networks: [proxy]
+    # expose: ["5000"]
+# networks:
+#   proxy:
+#     external: true

@@ -1,0 +1,6 @@
+# REM-OPS-01a: lint config for the CI quality gate. Enforces ruff's default rules
+# (pyflakes F + pycodestyle-errors E); the codebase passes clean today.
+# Expanding to import-sorting (I), bugbear (B) and pyupgrade (UP), plus adopting
+# `ruff format`, is tracked as REM-MAINT-06 (a focused, separate cleanup pass).
+target-version = "py312"
+line-length = 100

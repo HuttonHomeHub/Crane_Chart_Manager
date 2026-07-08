@@ -7,41 +7,48 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: pytest (unit + integration)
+  quality:
+    name: lint + dependency audit
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
+      - name: Install dev tooling
+        run: pip install -r requirements-dev.txt
+      - name: Ruff lint
+        run: ruff check app.py static tests
+      - name: Dependency vulnerability audit (pip-audit)
+        run: pip-audit -r requirements.txt --strict
 
+  test:
+    name: pytest (unit + integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run tests
-        run: pytest tests/ --ignore=tests/e2e -v --tb=short
+        run: pip install -r requirements-dev.txt
+      - name: Run tests with coverage
+        run: pytest tests/ --ignore=tests/e2e --cov=app --cov-report=term-missing --cov-fail-under=80 -v --tb=short
 
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
-
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
+        run: pip install -r requirements-dev.txt
       - name: Install Playwright browsers
         run: python -m playwright install --with-deps chromium
-
       - name: Run E2E tests
         run: pytest tests/e2e/ -v --tb=short

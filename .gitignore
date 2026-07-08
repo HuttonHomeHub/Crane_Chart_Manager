@@ -18,3 +18,7 @@ crane.db-shm
 
 # Local backup zips written by the dev server (default BACKUP_DIR = <db dir>/backups).
 backups/
+
+# Coverage artifacts
+.coverage
+htmlcov/

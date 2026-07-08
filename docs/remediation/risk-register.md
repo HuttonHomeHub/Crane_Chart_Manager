@@ -1,12 +1,18 @@
 # Risk Register
 
 Crane Charts — risks worth tracking.  
-Last updated: 2026-07-07 (v1.3.2)
+Last updated: 2026-07-08 (remediation programme, Session 1)
 
 Most entries below are CLOSED/MITIGATED historical records from the remediation (see
 [README.md](README.md)). The one still genuinely live is **RR-001** (no app-level auth —
 depends on the tinyauth/nginx gate). **RR-010** (crane.db loss) is MITIGATED by automated
-backups since v1.5.0, and **RR-011** (proxy headers) is MITIGATED (single hop / single worker).
+backups since v1.5.0 (and in-app restore since v1.8.0), and **RR-011** (proxy headers) is
+MITIGATED (single hop / single worker).
+
+**2026-07-08 audit follow-up (see [backlog.md](backlog.md)):** a dependency-scanning CI gate
+(`pip-audit`) + Dependabot were added and immediately caught **RR-012** below (a live Flask CVE),
+now fixed. The single-process architectural ceiling is tracked as **RR-013** (accepted). New
+risks are appended after RR-011.
 
 ---
 
@@ -234,4 +240,50 @@ R-017 (virtual scrolling) closed — frontend-only change (batched DOM rendering
 
 ---
 
-As of v1.5.0 no risk in this register is OPEN: RR-001 is ACCEPTED (gated by tinyauth), and RR-010 / RR-011 are MITIGATED. The 26 audit findings remain CLOSED or ACCEPTED_RISK.
+---
+
+## RR-012 — Vulnerable dependency shipping in the image (Flask CVE-2026-27205)
+
+| | |
+|---|---|
+| **ID** | RR-012 |
+| **Status** | CLOSED |
+| **Source** | Audit finding S2 → new `pip-audit` CI gate (REM-SEC-02a) |
+
+**Risk:** The published image bundled **Flask 3.1.1**, affected by **CVE-2026-27205** (fixed in
+3.1.3). Nothing in CI scanned for known-vulnerable dependencies, so it would have shipped
+indefinitely.
+
+**Mitigation (2026-07-08):** Bumped Flask to 3.1.3 (SEC-DEP-01); added a `pip-audit --strict`
+gate + Dependabot so future CVEs are caught proactively. `pip-audit` now reports no known
+vulnerabilities.
+
+**Residual risk:** Zero-day / not-yet-published CVEs remain undetectable until disclosed — the
+gate reduces window, doesn't eliminate it.
+
+---
+
+## RR-013 — Single-process architectural ceiling
+
+| | |
+|---|---|
+| **ID** | RR-013 |
+| **Status** | ACCEPTED |
+| **Source** | Audit findings B2 / S5 (REM-SCALE-02) |
+
+**Risk:** Consistency depends on an in-process `threading.Lock` and a `memory://` rate-limiter,
+and state lives on local FS + local WAL SQLite. Running >1 Gunicorn worker or >1 replica would
+corrupt the disk/DB invariant and multiply rate limits. The app cannot scale horizontally as-is.
+
+**Acceptance:** Correct and sufficient for the single-user, homelab, proxy-gated deployment. The
+Dockerfile pins `--workers 1` to enforce it.
+
+**Re-evaluation trigger:** Any need for multiple workers/replicas or HA — at which point the lock
+must move to a shared advisory lock and the limiter to Redis (do those *first*).
+
+---
+
+As of the 2026-07-08 remediation Session 1, no risk in this register is OPEN: RR-001 / RR-013 are
+ACCEPTED (gated / single-process by design), RR-010 / RR-011 are MITIGATED, and RR-012 is CLOSED.
+The programme backlog ([backlog.md](backlog.md)) tracks the remaining audit findings to a terminal
+state.

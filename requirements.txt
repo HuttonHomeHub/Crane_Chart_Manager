@@ -1,8 +1,6 @@
-Flask==3.1.1
+# Runtime dependencies only — this is what the Docker image installs.
+# SEC-DEP-01: Flask 3.1.1 → 3.1.3 fixes CVE-2026-27205 (surfaced by pip-audit in CI).
+Flask==3.1.3
 Flask-Limiter==3.9.0
 gunicorn==23.0.0
 python-json-logger==3.3.0
-
-# Dev / test only — needed for `pytest tests/`. Loose pin (pytest is API-stable).
-pytest>=8.0
-pytest-playwright>=0.6.0
