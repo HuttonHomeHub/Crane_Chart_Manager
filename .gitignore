@@ -15,3 +15,6 @@ metadata.json.migrated
 crane.db
 crane.db-wal
 crane.db-shm
+
+# Local backup zips written by the dev server (default BACKUP_DIR = <db dir>/backups).
+backups/

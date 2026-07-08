@@ -30,8 +30,15 @@ Current release: **v1.3.2** · Image: `ghcr.io/huttonhomehub/crane-charts`
 - **Bulk import** — drop a pile of PDFs (or multi-select in the picker) and they're grouped
   into cranes by the `Manufacturer Model (Label).pdf` filename convention. Fill Type +
   Capacity (with "apply to all"), pick each crane's primary, and import in one pass.
+- **Command palette** — `Ctrl/Cmd+K` jumps to any crane by make, model, or type, or filters by
+  capacity with a range query (`>=150`, `150+`) that lists everything at or above that tonnage,
+  smallest-first. Opening a crane deep-links the URL (`…/#crane/<id>`) so it's shareable and
+  bookmarkable.
 - **In-PDF find** — `Ctrl/Cmd+F` (or `/`) searches inside the open chart, highlights matches,
   and jumps between them. Ideal for locating a radius/capacity value in a dense table.
+- **Consistent data** — the make/type fields autocomplete from your existing catalogue, and a
+  **merge manufacturers** tool in Settings fixes a mistyped make (e.g. "Liebherri" → "Liebherr")
+  by moving all its cranes across in one click.
 - **Drag-and-drop** — drop one PDF to create a crane (or add to the open one), or many to
   bulk-import. The upload dialog's picker is itself a drop target.
 - **Fast catalogue** — cursor-paginated API and a virtual-scrolled sidebar handle large

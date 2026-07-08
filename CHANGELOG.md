@@ -4,6 +4,21 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.7.0 — find & data hygiene
+- **Command palette** (`Ctrl/Cmd+K`, or click the search box's hint): jump to any crane by
+  make, model, or type — fuzzy substring match — or filter by capacity with a range query
+  (`>=150`, `>150`, `≥150`, or `150+`), which lists every crane at or above that tonnage
+  sorted smallest-first. ↑↓ to navigate, ↵ to open, Esc to close.
+- **Deep-link URLs**: opening a crane updates the address bar to `…/#crane/<id>`; sharing or
+  bookmarking that link opens straight to the crane on load. Back/forward navigate between
+  viewed cranes.
+- **Manufacturer autocomplete**: the make and type fields (upload modal *and* bulk-import grid)
+  now suggest existing values from your catalogue, so spellings stay consistent.
+- **Merge manufacturers** tool in Settings: pick a mistyped make and the correct one, and every
+  crane moves across — re-slugged where the target name is free, absorbed (files merged) where a
+  crane already exists. Fixes "Liebherri" → "Liebherr" in one click.
+- New: `GET /api/facets`, `POST /api/merge-make`. (DL-029)
+
 ## v1.6.0 — settings panel
 - The app-bar **gear** opens a **Settings** panel: a **Backups** card (status, schedule,
   "Back up now", "Download fresh", and a list of existing backups you can download

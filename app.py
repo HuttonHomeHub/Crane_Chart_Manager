@@ -676,6 +676,86 @@ def get_pdfs():
         app.logger.exception('get_pdfs failed')
         return jsonify({'error': 'Internal server error'}), 500
 
+@app.route("/api/facets", methods=['GET'])
+def facets():
+    """Distinct manufacturers and types, for autocomplete + the merge tool."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            makes = [r[0] for r in conn.execute(
+                'SELECT DISTINCT make FROM cranes WHERE make<>"" ORDER BY make COLLATE NOCASE')]
+            types = [r[0] for r in conn.execute(
+                'SELECT DISTINCT type FROM cranes WHERE type<>"" ORDER BY type COLLATE NOCASE')]
+        return jsonify({'makes': makes, 'types': types}), 200
+    except Exception:
+        app.logger.exception('facets failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route("/api/merge-make", methods=['POST'])
+@limiter.limit(lambda: app.config['WRITE_RATE'])
+def merge_make():
+    """Data hygiene: move every crane under manufacturer `from` to `into` (fixes typo
+    splits like 'Liebherri' → 'Liebherr'). A crane re-slugs to its new make; if a crane
+    with the target slug already exists, the source crane's files are absorbed into it."""
+    data = request.get_json(silent=True) or {}
+    src = (data.get('from') or '').strip()
+    dst = (data.get('into') or '').strip()
+    if not src or not dst:
+        return jsonify({'error': 'from and into are required'}), 400
+    if src == dst:
+        return jsonify({'error': 'from and into are the same'}), 400
+    try:
+        cap_field(dst, 'Manufacturer')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    try:
+        now = datetime.now().isoformat()
+        moved = absorbed = 0
+        with metadata_lock():
+            sources = [c for c in list_cranes() if c['make'] == src]
+            if not sources:
+                return jsonify({'error': f'No cranes with manufacturer "{src}"'}), 404
+            for crane in sources:
+                new_id = generate_crane_id(dst, crane['type'], crane['model'], crane['capacity'])
+                old_dir = _crane_dir(crane['id'])
+                target = get_crane(new_id)
+                if target is None:
+                    # Free slug → rename the crane (dir + rows).
+                    new_dir = _crane_dir(new_id)
+                    if os.path.exists(old_dir):
+                        os.rename(old_dir, new_dir)
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute('UPDATE cranes SET id=?, make=?, updated_at=? WHERE id=?',
+                                     (new_id, dst, now, crane['id']))
+                        conn.execute('UPDATE files SET crane_id=? WHERE crane_id=?', (new_id, crane['id']))
+                        conn.commit()
+                    moved += 1
+                else:
+                    # Target exists → absorb this crane's files into it, then delete the source.
+                    target_dir = _crane_dir(new_id)
+                    os.makedirs(target_dir, exist_ok=True)
+                    with sqlite3.connect(DB_FILE) as conn:
+                        for f in crane['files']:
+                            stored = _dedupe_stored_name(target_dir, f['stored_name'])
+                            src_path = os.path.join(old_dir, f['stored_name'])
+                            if os.path.exists(src_path):
+                                os.rename(src_path, os.path.join(target_dir, stored))
+                            conn.execute(
+                                '''INSERT INTO files (crane_id, stored_name, original_filename, label, uploaded_at)
+                                   VALUES (?, ?, ?, ?, ?)''',
+                                (new_id, stored, f['original_filename'], f['label'], f['uploaded_at']))
+                        conn.execute('DELETE FROM files WHERE crane_id=?', (crane['id'],))
+                        conn.execute('DELETE FROM cranes WHERE id=?', (crane['id'],))
+                        conn.commit()
+                    shutil.rmtree(old_dir, ignore_errors=True)
+                    absorbed += 1
+                log_event('merge', crane['id'],
+                          before={'make': src}, after={'make': dst, 'new_id': new_id})
+        return jsonify({'success': True, 'moved': moved, 'absorbed': absorbed}), 200
+    except Exception:
+        app.logger.exception('merge_make failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
 @app.route("/api/upload", methods=['POST'])
 @limiter.limit(lambda: app.config['UPLOAD_RATE'])
 def upload_file():

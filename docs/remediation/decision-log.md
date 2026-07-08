@@ -1,7 +1,7 @@
 # Decision Log
 
 Crane Charts — living record of significant design decisions.  
-Last updated: 2026-07-07 (v1.6.0)
+Last updated: 2026-07-08 (v1.7.0)
 
 `DL-001`–`DL-020` cover the 2026-07-06 engineering remediation (see [README.md](README.md));
 `DL-021` onward cover the post-1.0 features (multi-file cranes, in-PDF find, bulk import,
@@ -420,3 +420,36 @@ Ships as v1.5.0.
 **Consequences:** New `settings` JS module + `#settings-modal`; routes `GET /api/info` and
 `GET /api/backup/download/<name>`. 75 backend + 18 E2E (3 new backend: info + download-by-name
 + bad-name 404; the E2E backup test became a full settings-flow test). Ships as v1.6.0.
+
+## DL-029 — Find & data hygiene: command palette, deep links, autocomplete, merge
+
+**Date:** 2026-07-08
+**Finding:** F-010 (retrieval at scale + keeping the catalogue clean as it grows)
+
+**Decisions:**
+1. **Client-side command palette, not a search API.** The whole catalogue already lives in
+   `state.files` after `loadFileList()`, so the palette (`Ctrl/Cmd+K`) filters in-memory — no
+   round-trip, instant results. Fuzzy substring across make/model/type/capacity covers "jump to
+   a crane"; a capacity-range grammar (`>=N`, `>N`, `≥N`, `N+`) covers "show me everything ≥N
+   tonnes" and sorts ascending by parsed capacity. Capped at 60 rows so a broad query stays fast
+   to render. A server-side search endpoint would be premature at homelab catalogue sizes.
+2. **Deep links via URL hash, not History pushState routes.** `#crane/<id>` is a fragment, so it
+   needs no server route and can't 404 on refresh behind nginx/tinyauth. `viewer.openFile()`
+   writes the hash (suppress flag prevents a set→hashchange→open loop); `deepLink.resolve()` runs
+   once after the first list load and on every `hashchange`. Shareable/bookmarkable, back/forward
+   just work.
+3. **Native `<datalist>` autocomplete, not a JS combobox.** `GET /api/facets` yields distinct
+   makes/types; feeding them into `<datalist>`s gets browser-native suggestions on both the
+   upload modal and the bulk grid with zero extra widget code or a11y burden. `refreshFacets()`
+   re-runs after each list load and after a merge so suggestions never go stale.
+4. **Merge is re-slug-or-absorb, under the lock, and mirrors edit.** Because the make is part of
+   the crane slug/directory, fixing a mistyped make is structurally the same as editing metadata:
+   recompute `new_id` per crane and either rename the dir+rows (target free) or absorb the files
+   into the existing crane and delete the source (target taken). Held in `metadata_lock()` like
+   every other disk+DB mutation; emits a `merge` audit event. Exposed only in Settings (a bulk,
+   destructive-ish operation gated behind a confirm dialog), not the main toolbar.
+
+**Consequences:** New routes `GET /api/facets`, `POST /api/merge-make`; new `FACETS·PALETTE·DEEP
+LINKS` JS region; `#palette-modal` + Settings "Merge manufacturers" card + two `<datalist>`s.
+79 backend + 21 E2E (4 new backend: facets + merge rename/absorb/validation; 3 new E2E: palette
+jump+capacity, deep-link-on-load, merge flow). Ships as v1.7.0.

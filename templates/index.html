@@ -91,8 +91,8 @@
         </a>
         <div class="app-bar__search" role="search">
             <svg class="icon icon--muted"><use href="#icon-search"/></svg>
-            <input id="search-input" type="search" placeholder="Search make, type, model, capacity…" aria-label="Search">
-            <kbd class="kbd" data-mod-key="K">{{ '⌘K' if is_mac else 'Ctrl+K' }}</kbd>
+            <input id="search-input" type="search" placeholder="Filter the list…" aria-label="Filter the sidebar list">
+            <kbd class="kbd kbd--hint" id="palette-hint" data-mod-key="K" title="Jump to a crane">{{ '⌘K' if is_mac else 'Ctrl+K' }}</kbd>
         </div>
         <div class="app-bar__spacer"></div>
         <div class="app-bar__actions">
@@ -278,11 +278,11 @@
                     <div class="form-grid" id="metadata-grid">
                         <div class="form-field">
                             <label for="make-input">Manufacturer</label>
-                            <input id="make-input" type="text" required placeholder="Liebherr, Tadano, Manitowoc…">
+                            <input id="make-input" type="text" required placeholder="Liebherr, Tadano, Manitowoc…" list="facet-makes" autocomplete="off">
                         </div>
                         <div class="form-field">
                             <label for="type-input">Type</label>
-                            <input id="type-input" type="text" required placeholder="Mobile, Crawler, Tower…">
+                            <input id="type-input" type="text" required placeholder="Mobile, Crawler, Tower…" list="facet-types" autocomplete="off">
                         </div>
                         <div class="form-field">
                             <label for="model-input">Model</label>
@@ -364,6 +364,19 @@
                 </section>
 
                 <section class="settings__card">
+                    <div class="settings__card-head"><h3>Merge manufacturers</h3></div>
+                    <p class="settings__note">Fix a mistyped manufacturer by moving all its cranes onto
+                       the correct one (e.g. <em>Liebherri</em> → <em>Liebherr</em>).</p>
+                    <div class="settings__merge">
+                        <select id="merge-from" aria-label="Manufacturer to merge from"></select>
+                        <svg class="icon icon--muted"><use href="#icon-chevron-right"/></svg>
+                        <select id="merge-into" aria-label="Manufacturer to merge into"></select>
+                        <button type="button" class="btn btn--ghost btn--sm" id="merge-btn">Merge</button>
+                    </div>
+                    <p class="settings__merge-status" id="merge-status" role="status"></p>
+                </section>
+
+                <section class="settings__card">
                     <div class="settings__card-head"><h3>This instance</h3></div>
                     <dl class="settings__info" id="settings-info"></dl>
                     <div class="settings__actions">
@@ -378,6 +391,23 @@
         </div>
     </dialog>
 
+    <!-- Command palette: Ctrl/Cmd+K — fuzzy-jump to any crane, or filter by capacity. -->
+    <dialog class="modal palette" id="palette-modal" aria-label="Find a crane">
+        <div class="palette__panel">
+            <div class="palette__search">
+                <svg class="icon icon--muted"><use href="#icon-search"/></svg>
+                <input id="palette-input" type="text" autocomplete="off" spellcheck="false"
+                       placeholder="Jump to a crane — make, model, or capacity (try ≥150t)">
+            </div>
+            <ul class="palette__results" id="palette-results"></ul>
+            <div class="palette__hint">
+                <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> navigate</span>
+                <span><kbd class="kbd">↵</kbd> open</span>
+                <span><kbd class="kbd">Esc</kbd> close</span>
+            </div>
+        </div>
+    </dialog>
+
     <!-- Shortcuts overlay -->
     <dialog class="modal" id="shortcuts-modal" aria-labelledby="shortcuts-title">
         <div class="modal__panel modal__panel--md">
@@ -388,7 +418,7 @@
                 </button>
             </header>
             <div class="shortcuts">
-                <div class="shortcut-row"><span>Focus search</span><span class="shortcut-row__keys"><kbd class="kbd" data-mod>{{ '⌘' if is_mac else 'Ctrl' }}</kbd><kbd class="kbd">K</kbd></span></div>
+                <div class="shortcut-row"><span>Find a crane (palette)</span><span class="shortcut-row__keys"><kbd class="kbd" data-mod>{{ '⌘' if is_mac else 'Ctrl' }}</kbd><kbd class="kbd">K</kbd></span></div>
                 <div class="shortcut-row"><span>Upload</span><span class="shortcut-row__keys"><kbd class="kbd" data-mod>{{ '⌘' if is_mac else 'Ctrl' }}</kbd><kbd class="kbd">U</kbd></span></div>
                 <div class="shortcut-row"><span>Previous page</span><span class="shortcut-row__keys"><kbd class="kbd">←</kbd></span></div>
                 <div class="shortcut-row"><span>Next page</span><span class="shortcut-row__keys"><kbd class="kbd">→</kbd></span></div>
@@ -416,6 +446,10 @@
             </footer>
         </div>
     </dialog>
+
+    <!-- Autocomplete sources for the make/type inputs; filled from /api/facets. -->
+    <datalist id="facet-makes"></datalist>
+    <datalist id="facet-types"></datalist>
 
     <script type="module" src="{{ versioned_static('main.js') }}"></script>
 </body>

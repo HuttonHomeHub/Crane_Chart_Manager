@@ -255,7 +255,27 @@ const api = {
         if (!r.ok) throw new Error((await safeErr(r)) || 'Backup failed');
         return r.json();
     },
+    async facets() {
+        const r = await fetch('/api/facets');
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Could not load facets');
+        return r.json();
+    },
+    async mergeMake(from, into) {
+        const r = await fetch('/api/merge-make', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+            body: JSON.stringify({ from, into }),
+        });
+        if (!r.ok) throw new Error((await safeErr(r)) || 'Merge failed');
+        return r.json();
+    },
 };
+
+// Pull the leading number out of a capacity string ("150t" → 150, "1 200 t" → 1200).
+function parseCapacity(s) {
+    const m = String(s || '').replace(/[,\s]/g, '').match(/(\d+(?:\.\d+)?)/);
+    return m ? parseFloat(m[1]) : null;
+}
 
 async function safeErr(r) {
     try { return (await r.json()).error; } catch (_) { return null; }
@@ -829,6 +849,9 @@ const bulkImport = (() => {
         inp.value = d[field] || '';
         inp.placeholder = PLACEHOLDER[field];
         inp.setAttribute('aria-label', field);
+        // Autocomplete make/type from existing values (avoids "Liebherri"-style splits).
+        if (field === 'make') inp.setAttribute('list', 'facet-makes');
+        else if (field === 'type') inp.setAttribute('list', 'facet-types');
         inp.addEventListener('input', () => { d[field] = inp.value; clearRowError(d); });
         d.inputs[field] = inp;
         wrap.appendChild(inp);
@@ -1002,13 +1025,7 @@ const shortcuts = {
         if (mod && e.key.toLowerCase() === 'k') {
             e.preventDefault();
             if (modal.isOpen()) return;
-            const s = $('#search-input');
-            // On mobile the input is display:none until the toggle button reveals it.
-            if (window.getComputedStyle(s).display === 'none') {
-                $('#search-toggle').click();
-            } else {
-                s.focus(); s.select();
-            }
+            palette.open();   // Ctrl/Cmd+K → command palette (fuzzy-jump to a crane)
             return;
         }
         if (mod && e.key.toLowerCase() === 'u') {
@@ -1202,6 +1219,7 @@ const sidebar = {
             state.files = files;
             this.renderMakes(files);
             viewer.refreshEmptyCopy();
+            refreshFacets();   // keep autocomplete + merge selects current
         } catch (err) {
             toast.danger('Could not load documents', err.message || String(err));
             makeList.innerHTML = '';
@@ -1708,6 +1726,7 @@ const viewer = {
         updateInfoBar(crane);
         updateTitle(crane);
         this._renderStrip();
+        deepLink.set(crane.id);   // reflect the open crane in the URL (/#crane/<id>)
         const primary = this._primaryOf(crane);
         if (primary) await this._loadPdf(primary);
     },
@@ -2323,6 +2342,189 @@ const settings = (() => {
 })();
 
 /* =========================================================
+   REGION: FACETS · COMMAND PALETTE · DEEP LINKS
+   ========================================================= */
+
+// Fill the make/type autocomplete <datalist>s and the merge-tool selects from /api/facets.
+async function refreshFacets() {
+    let f;
+    try { f = await api.facets(); } catch (_) { return; }
+    const fillDatalist = (el, values) => {
+        if (!el) return;
+        el.innerHTML = '';
+        for (const v of values) { const o = document.createElement('option'); o.value = v; el.appendChild(o); }
+    };
+    fillDatalist($('#facet-makes'), f.makes);
+    fillDatalist($('#facet-types'), f.types);
+    const fillSelect = (el, values, ph) => {
+        if (!el) return;
+        const keep = el.value;
+        el.innerHTML = '';
+        const d = document.createElement('option'); d.value = ''; d.textContent = ph; el.appendChild(d);
+        for (const v of values) { const o = document.createElement('option'); o.value = v; o.textContent = v; el.appendChild(o); }
+        if (values.includes(keep)) el.value = keep;
+    };
+    fillSelect($('#merge-from'), f.makes, 'From…');
+    fillSelect($('#merge-into'), f.makes, 'Into…');
+}
+
+// Open a crane the way clicking it in the sidebar would: select its make, load its
+// primary file, highlight the row. Used by the palette and deep-link resolution.
+function openCrane(crane) {
+    if (!crane) return;
+    const make = crane.make || 'Unknown';
+    const makeBtn = Array.from($('#make-list').querySelectorAll('.make-item')).find(b => b.dataset.make === make);
+    if (makeBtn) {
+        const group = (state.files || []).filter(f => (f.make || 'Unknown') === make);
+        sidebar.selectMake(make, group, makeBtn);
+    }
+    viewer.openFile(crane);
+    sidebar._flushModelQueue();
+    const row = Array.from($('#model-list').querySelectorAll('.model-item'))
+        .find(r => r.dataset.filename === crane.id);
+    if (row) {
+        $$('.model-item').forEach(el => el.classList.remove('is-active'));
+        row.classList.add('is-active');
+        row.scrollIntoView({ block: 'nearest' });
+    }
+}
+
+// ---- Deep links (/#crane/<id>) ----
+const deepLink = (() => {
+    let suppress = false;
+    function set(id) {
+        const target = '#crane/' + encodeURIComponent(id);
+        if (location.hash === target) return;
+        suppress = true;
+        location.hash = target;
+        setTimeout(() => { suppress = false; }, 0);
+    }
+    function resolve() {
+        const m = location.hash.match(/^#crane\/(.+)$/);
+        if (!m) return;
+        const id = decodeURIComponent(m[1]);
+        if (state.current && state.current.id === id) return;
+        const crane = (state.files || []).find(f => f.id === id);
+        if (crane) openCrane(crane);
+    }
+    window.addEventListener('hashchange', () => { if (!suppress) resolve(); });
+    return { set, resolve };
+})();
+
+// ---- Command palette (Ctrl/Cmd+K) ----
+const palette = (() => {
+    const input = $('#palette-input');
+    const results = $('#palette-results');
+    let items = [];
+    let active = -1;
+
+    // A "minimum capacity" query: ">=150", ">150", "≥150", "150+", "150t+".
+    function minCapacity(q) {
+        let m = q.match(/^\s*(?:>=|>|≥)\s*(\d+(?:\.\d+)?)/);
+        if (!m) m = q.match(/^\s*(\d+(?:\.\d+)?)\s*t?\s*\+\s*$/i);
+        return m ? parseFloat(m[1]) : null;
+    }
+
+    function run(raw) {
+        const q = (raw || '').trim().toLowerCase();
+        const all = state.files || [];
+        let list;
+        if (!q) {
+            list = all;
+        } else {
+            const min = minCapacity(q);
+            if (min != null) {
+                list = all.filter(c => { const n = parseCapacity(c.capacity); return n != null && n >= min; })
+                          .sort((a, b) => (parseCapacity(a.capacity) || 0) - (parseCapacity(b.capacity) || 0));
+            } else {
+                const terms = q.split(/\s+/);
+                list = all.filter(c => {
+                    const hay = `${c.make || ''} ${c.type || ''} ${c.model || ''} ${c.capacity || ''} ` +
+                        (c.files || []).map(f => f.label || '').join(' ');
+                    const low = hay.toLowerCase();
+                    return terms.every(t => low.includes(t));
+                });
+            }
+        }
+        items = list.slice(0, 60);
+        active = items.length ? 0 : -1;
+        render();
+    }
+
+    function render() {
+        results.innerHTML = '';
+        if (!items.length) {
+            const li = document.createElement('li');
+            li.className = 'palette__empty';
+            li.textContent = (state.files || []).length ? 'No cranes match.' : 'No cranes yet.';
+            results.appendChild(li);
+            return;
+        }
+        items.forEach((c, i) => {
+            const li = document.createElement('li');
+            li.className = 'palette__result' + (i === active ? ' is-active' : '');
+            li.innerHTML = '<span class="palette__result-title"></span><span class="palette__result-meta"></span>';
+            li.querySelector('.palette__result-title').textContent = `${c.make || ''} ${c.model || ''}`.trim();
+            li.querySelector('.palette__result-meta').textContent =
+                [c.capacity, c.type, (c.file_count > 1 ? `${c.file_count} files` : '')].filter(Boolean).join(' · ');
+            li.addEventListener('click', () => choose(i));
+            results.appendChild(li);
+        });
+        const act = results.querySelector('.is-active');
+        if (act) act.scrollIntoView({ block: 'nearest' });
+    }
+
+    function choose(i) {
+        const c = items[i];
+        if (!c) return;
+        modal.close('palette-modal');
+        openCrane(c);
+    }
+
+    function open() {
+        if (modal.isOpen()) return;
+        modal.open('palette-modal');
+        input.value = '';
+        run('');
+        input.focus();
+    }
+
+    input.addEventListener('input', () => run(input.value));
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); if (items.length) { active = Math.min(active + 1, items.length - 1); render(); } }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); if (items.length) { active = Math.max(active - 1, 0); render(); } }
+        else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0) choose(active); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); modal.close('palette-modal'); }
+    });
+
+    return { open };
+})();
+
+// ---- Merge-manufacturers tool (in the Settings panel) ----
+$('#merge-btn').addEventListener('click', async () => {
+    const from = $('#merge-from').value;
+    const into = $('#merge-into').value;
+    const status = $('#merge-status');
+    if (!from || !into) { status.textContent = 'Pick both manufacturers.'; return; }
+    if (from === into) { status.textContent = 'Pick two different manufacturers.'; return; }
+    const ok = await confirmDialog(`Move all "${from}" cranes onto "${into}"? This can't be undone.`);
+    if (!ok) return;
+    status.textContent = 'Merging…';
+    try {
+        const res = await api.mergeMake(from, into);
+        status.textContent = `Merged ${res.moved + res.absorbed} crane(s) into "${into}".`;
+        toast.success('Manufacturers merged');
+        await sidebar.loadFileList();
+        await refreshFacets();
+    } catch (err) {
+        status.textContent = '';
+        toast.danger('Merge failed', err.message || String(err));
+    }
+});
+
+$('#palette-hint').addEventListener('click', () => palette.open());
+
+/* =========================================================
    REGION: INIT
    =========================================================
    NOTE: this module has a top-level `await import(...)` for PDF.js.
@@ -2347,7 +2549,8 @@ function start() {
     dropzone.init();
     sidebar.init();
     viewer.init();
-    sidebar.loadFileList();
+    // Open a deep-linked crane (/#crane/<id>) once the catalogue has loaded.
+    sidebar.loadFileList().then(() => deepLink.resolve());
 }
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);
