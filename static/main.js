@@ -1596,17 +1596,49 @@ const sidebar = {
         // (model/capacity/type/label), so searching "500t" keeps the makes that have one.
         const searchText = this._makeSearchText || {};
         let visibleMakes = 0;
+        let selectedVisible = false;
+        let firstVisibleEl = null;
+        const nameMatchEls = [];   // visible makes whose *name* matches the query
         $$('.make-item', makeList).forEach(el => {
-            const hay = searchText[el.dataset.make] || el.textContent.toLowerCase();
+            const make = el.dataset.make;
+            const hay = searchText[make] || el.textContent.toLowerCase();
             const match = !q || hay.includes(q);
             el.classList.toggle('is-hidden', !match);
-            if (match) visibleMakes++;
+            if (match) {
+                visibleMakes++;
+                if (!firstVisibleEl) firstVisibleEl = el;
+                if (q && make && make.toLowerCase().includes(q)) nameMatchEls.push(el);
+                if (make === state.selectedMake) selectedVisible = true;
+            }
         });
+
+        // "Jump to the make": if the query filtered the current selection out of the
+        // make panel, move to the first still-visible make (preferring one whose *name*
+        // matches — e.g. "Gottwald") and let its selectMake() rebuild + re-filter the
+        // model panel. The _jumping guard stops selectMake's trailing filter() re-entry
+        // from jumping again. Model-name/capacity queries keep the selection (it stays
+        // visible via its cranes' searchText), so they filter within the current make.
+        if (q && !this._jumping && visibleMakes > 0 && !selectedVisible) {
+            const targetEl = nameMatchEls[0] || firstVisibleEl;
+            if (targetEl && targetEl.dataset.make !== state.selectedMake) {
+                const make = targetEl.dataset.make;
+                const files = (state.files || []).filter(f => (f.make || 'Unknown') === make);
+                this._jumping = true;
+                this.selectMake(make, files, targetEl);
+                this._jumping = false;
+                return;
+            }
+        }
+
+        // Fold the selected make's name into each row's haystack so a make-name query
+        // (which carries no model text) still matches all of that make's rows.
+        const selMake = (state.selectedMake || '').toLowerCase();
         let visibleModels = 0;
         $$('.type-group', modelList).forEach(group => {
             let anyVisible = false;
             $$('.model-item', group).forEach(item => {
-                const match = !q || item.textContent.toLowerCase().includes(q);
+                const hay = selMake + ' ' + item.textContent.toLowerCase();
+                const match = !q || hay.includes(q);
                 item.classList.toggle('is-hidden', !match);
                 if (match) { anyVisible = true; visibleModels++; }
             });
