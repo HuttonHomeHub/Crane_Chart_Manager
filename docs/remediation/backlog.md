@@ -14,9 +14,9 @@ Legend for Source: audit finding IDs — F=frontend, B=backend, D=database, S=se
 
 ---
 
-## Status summary (as of Session 1 — 2026-07-08)
+## Status summary (as of Session 1 — 2026-07-08; Cycle 1 merged to main as v1.8.3 → CLOSED)
 
-| Band | Total | CLOSED/VALIDATED | ACCEPTED_RISK | Open (NOT_STARTED/IN_ANALYSIS) |
+| Band | Total | CLOSED | ACCEPTED_RISK | Open (NOT_STARTED/IN_ANALYSIS) |
 |------|-------|------------------|---------------|--------------------------------|
 | P1 data/integrity | 5 | 0 | 2 | 3 |
 | P2 authn/authz | 1 | 0 | 1 | 0 |
@@ -52,14 +52,14 @@ Legend for Source: audit finding IDs — F=frontend, B=backend, D=database, S=se
 
 | ID | Src | Sev | Status | Deps | Validation method | Completion criteria |
 |----|-----|-----|--------|------|-------------------|---------------------|
-| SEC-DEP-01 | *new (pip-audit)* | High | VALIDATED | REM-SEC-02a | `pip-audit -r requirements.txt --strict` clean; suite green | Flask 3.1.1→3.1.3 (CVE-2026-27205) ✔ |
-| REM-SEC-02a | S2 | Medium | VALIDATED | — | CI `pip-audit` step present & green | Dependency CVE scan enforced in CI ✔ |
-| REM-SEC-02b | S2 | Medium | VALIDATED | — | `.github/dependabot.yml` present | Dependabot for pip + actions + docker ✔ |
-| REM-SEC-02c | S2 | Medium | VALIDATED | — | Dockerfile `FROM …@sha256:` | Base image digest-pinned (verified digest) ✔ |
+| SEC-DEP-01 | *new (pip-audit)* | High | CLOSED | REM-SEC-02a | `pip-audit -r requirements.txt --strict` clean; suite green | Flask 3.1.1→3.1.3 (CVE-2026-27205) ✔ |
+| REM-SEC-02a | S2 | Medium | CLOSED | — | CI `pip-audit` step present & green | Dependency CVE scan enforced in CI ✔ |
+| REM-SEC-02b | S2 | Medium | CLOSED | — | `.github/dependabot.yml` present | Dependabot for pip + actions + docker ✔ |
+| REM-SEC-02c | S2 | Medium | CLOSED | — | Dockerfile `FROM …@sha256:` | Base image digest-pinned (verified digest) ✔ |
 | REM-SEC-02d | S2 | Low | NOT_STARTED | — | `pip install --require-hashes` succeeds | Hash-pinned runtime deps / lockfile |
-| REM-SEC-02e | *new (this cycle)* | Low | VALIDATED | — | Runtime `requirements.txt` excludes test/lint tools | Dev deps split into `requirements-dev.txt`; smaller image/attack surface ✔ |
-| REM-SEC-03 | S3 | Low | VALIDATED | — | Code review: `debug=CRANE_DEBUG=='1'`; suite green | Werkzeug debugger opt-in only ✔ |
-| REM-SEC-04 | S4 | Low | VALIDATED | — | `test_csp_header…` asserts `object-src 'none'` | CSP `object-src 'none'` ✔ (Content-Disposition on `/uploads` deferred — optional, low value) |
+| REM-SEC-02e | *new (this cycle)* | Low | CLOSED | — | Runtime `requirements.txt` excludes test/lint tools | Dev deps split into `requirements-dev.txt`; smaller image/attack surface ✔ |
+| REM-SEC-03 | S3 | Low | CLOSED | — | Code review: `debug=CRANE_DEBUG=='1'`; suite green | Werkzeug debugger opt-in only ✔ |
+| REM-SEC-04 | S4 | Low | CLOSED | — | `test_csp_header…` asserts `object-src 'none'` | CSP `object-src 'none'` ✔ (Content-Disposition on `/uploads` deferred — optional, low value) |
 | REM-SEC-05 | S5 | Low | ACCEPTED_RISK | REM-SCALE-02 | n/a | Per-process/in-memory rate-limit counters accepted (single worker, gated). Reopens with SCALE-02. |
 | REM-SEC-06 | B6 | Low | ACCEPTED_RISK | — | n/a | Header-only PDF validation accepted given the gated, single-user deployment + `nosniff` + sandboxed viewer. Revisit if exposed. |
 
@@ -74,13 +74,13 @@ Legend for Source: audit finding IDs — F=frontend, B=backend, D=database, S=se
 
 | ID | Src | Sev | Status | Deps | Validation method | Completion criteria |
 |----|-----|-----|--------|------|-------------------|---------------------|
-| REM-OPS-01a | O1 | High | VALIDATED | — | CI `ruff check` green | Lint gate in CI ✔ |
-| REM-OPS-01c | O1/T3 | High | VALIDATED | — | CI `--cov-fail-under=80` green (82.48%) | Coverage gate in CI ✔ |
+| REM-OPS-01a | O1 | High | CLOSED | — | CI `ruff check` green | Lint gate in CI ✔ |
+| REM-OPS-01c | O1/T3 | High | CLOSED | — | CI `--cov-fail-under=80` green (82.48%) | Coverage gate in CI ✔ |
 | REM-OPS-01d | O1 | Medium | NOT_STARTED | — | CI `bandit` step green | SAST (bandit) in CI |
 | REM-OPS-01e | O1 | Medium | NOT_STARTED | — | CI `trivy image` step | Container image scan in CI (needs build in pipeline) |
-| REM-OPS-02 | O2 | Medium | VALIDATED | — | `deploy/compose.example.yml` present | Reference IaC committed ✔ |
-| REM-OPS-03 | O3 | Medium | VALIDATED* | — | `test_backup_status_reports_scheduler_health` | Backup scheduler health surfaced in `/api/backup` ✔. *`/metrics` endpoint deferred (REM-OPS-06). |
-| REM-OPS-04 | O4 | Low | VALIDATED | — | Dockerfile healthcheck `timeout=3` | Healthcheck fails fast ✔ |
+| REM-OPS-02 | O2 | Medium | CLOSED | — | `deploy/compose.example.yml` present | Reference IaC committed ✔ |
+| REM-OPS-03 | O3 | Medium | CLOSED* | — | `test_backup_status_reports_scheduler_health` | Backup scheduler health surfaced in `/api/backup` ✔. *`/metrics` endpoint deferred (REM-OPS-06). |
+| REM-OPS-04 | O4 | Low | CLOSED | — | Dockerfile healthcheck `timeout=3` | Healthcheck fails fast ✔ |
 | REM-OPS-06 | O3 | Low | NOT_STARTED | — | `/metrics` scrape | Prometheus metrics endpoint (optional for homelab) |
 
 ## P6 — Testing
@@ -121,3 +121,5 @@ Legend for Source: audit finding IDs — F=frontend, B=backend, D=database, S=se
   Newly discovered: SEC-DEP-01 (real Flask CVE via new scanner), REM-SEC-02e (image slimming),
   REM-MAINT-06 (ruff format). Dependency discovered: REM-DATA-01 now blocked-behind REM-MAINT-03
   + a table-rebuild migration (FK + id-rename interaction). REM-DEP-02, REM-TEST-03 superseded.
+- **2026-07-08 (Session 1, post-merge):** Cycle 1 merged to `main` and released as **v1.8.3**;
+  the 12 Cycle-1 items advanced `VALIDATED → CLOSED`. Remaining: 17 open, 7 ACCEPTED_RISK, 2 SUPERSEDED.
