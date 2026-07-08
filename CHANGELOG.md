@@ -4,6 +4,11 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.7.1 — sidebar make search fix
+- Searching a **manufacturer name** in the sidebar now jumps to that make and lists its
+  models, instead of showing the make but hiding every model. (Model rows carry no make name,
+  so a make-name query previously matched nothing in the model panel.)
+
 ## v1.7.0 — find & data hygiene
 - **Command palette** (`Ctrl/Cmd+K`, or click the search box's hint): jump to any crane by
   make, model, or type — fuzzy substring match — or filter by capacity with a range query

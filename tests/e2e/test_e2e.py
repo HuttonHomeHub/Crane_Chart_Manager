@@ -593,6 +593,26 @@ class TestSidebarUX:
         expect(page.locator('.make-item').filter(has_text='Betacrane')).to_be_visible()
         expect(page.locator('.make-item').filter(has_text='Gammacrane')).to_be_hidden()
 
+    def test_search_make_name_jumps_and_shows_its_models(self, page: Page, live_server: str):
+        """Searching a make name selects that make and shows its models — even when a
+        different make was selected (the model rows don't carry the make name)."""
+        page.goto(live_server)
+        _api_upload(page, live_server, make='Zjumpalpha', model_type='Mobile', model='JA1', capacity='40t')
+        _api_upload(page, live_server, make='Zjumpbeta', model_type='All Terrain', model='JB1', capacity='80t')
+        page.reload()
+        page.wait_for_load_state('networkidle')
+
+        # Select the first make so the model panel is showing Zjumpalpha's rows.
+        page.locator('.make-item').filter(has_text='Zjumpalpha').click()
+        expect(page.locator('.model-item').filter(has_text='JA1')).to_be_visible()
+
+        # Search the OTHER make's name: it should jump to Zjumpbeta and list JB1.
+        page.locator('#search-input').fill('zjumpbeta')
+        expect(page.locator('.make-item').filter(has_text='Zjumpbeta'))\
+            .to_have_class(re.compile(r'\bis-active\b'))
+        expect(page.locator('.make-item').filter(has_text='Zjumpalpha')).to_be_hidden()
+        expect(page.locator('.model-item').filter(has_text='JB1')).to_be_visible()
+
 
 class TestSettingsPanel:
     def test_settings_backup_flow_and_info(self, page: Page, live_server: str):
