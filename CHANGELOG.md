@@ -4,6 +4,12 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+## v1.8.2 — palette close button + text weight
+- The **command palette** now has an **✕ close button** top-right, matching the Settings and
+  Keyboard-shortcuts dialogs.
+- Its search text sits at the same size/weight as the other dialogs' inputs — the placeholder was
+  falling back to the heavier browser-default colour; it now uses the app's tertiary tone.
+
 ## v1.8.1 — palette styling polish
 - The **command palette** (Ctrl/Cmd+K) now matches the upload/settings dialogs: same 14px corner
   radius, same header/footer padding rhythm, and a canvas-tinted hint bar. The search field no
