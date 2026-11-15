@@ -1,10 +1,11 @@
 # Dev / test / CI-quality tooling. NOT installed into the runtime image — keeping
 # these out of requirements.txt shrinks the image and its dependency attack surface
-# (SEC-DEP-02). Install locally with:  pip install -r requirements-dev.txt
+# (SEC-DEP-02). Pinned exactly so CI and local checks run the same tools; Dependabot
+# raises the pins in a weekly PR into dev, where any new findings show up first.
 -r requirements.txt
 
-pytest>=8.0
-pytest-playwright>=0.6.0
-pytest-cov>=5.0          # coverage gate (REM-OPS-05 / T3)
-ruff>=0.6                # lint + format (REM-OPS-01a)
-pip-audit>=2.7           # dependency CVE scan (REM-SEC-02 / S2)
+pytest==9.2.0
+pytest-playwright==0.10.0
+pytest-cov==7.1.0          # coverage gate (REM-OPS-05 / T3)
+ruff==0.17.5               # lint (REM-OPS-01a); rule list locked in ruff.toml
+pip-audit==2.10.1          # dependency CVE scan (REM-SEC-02 / S2)

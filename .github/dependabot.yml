@@ -1,22 +1,39 @@
-# REM-SEC-02: automated dependency + action + base-image update PRs, so a fix like
-# the Flask CVE-2026-27205 bump lands proactively instead of being caught late by audit.
+# Dependency updates. Every PR targets dev, never main: merging into main is a
+# release, and that stays the owner's decision. Minor and patch bumps are grouped
+# into one weekly PR per ecosystem; major bumps get their own PRs so they can be
+# tested on their own. Security updates are off in repo settings (they always
+# target main); alerts stay on.
 version: 2
 updates:
-  - package-ecosystem: "pip"
-    directory: "/"
+  - package-ecosystem: pip
+    directory: /
+    target-branch: dev
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+      interval: weekly
+      day: monday
     groups:
-      python-deps:
-        patterns: ["*"]
+      python-minor-patch:
+        update-types: [minor, patch]
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
     schedule:
-      interval: "weekly"
+      interval: weekly
+      day: monday
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
 
-  - package-ecosystem: "docker"
-    directory: "/"
+  # Python base image in the Dockerfile. A new Python version (e.g. 3.12 -> 3.14)
+  # is a deliberate choice that also touches ci.yml, so only patch-level digest
+  # and tag updates are proposed here.
+  - package-ecosystem: docker
+    directory: /
+    target-branch: dev
     schedule:
-      interval: "weekly"
+      interval: weekly
+      day: monday
+    ignore:
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
