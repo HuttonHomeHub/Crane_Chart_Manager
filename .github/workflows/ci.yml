@@ -1,14 +1,20 @@
 name: CI
 
 on:
+  # Pushes to main are checked by publish-image.yml, which calls this workflow
+  # before building, so main isn't listed here (avoids running CI twice).
   push:
-    branches: [main]
+    branches: [dev, 'claude/**']
   pull_request:
-    branches: [main]
+    branches: [main, dev]
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
-  quality:
-    name: lint + dependency audit
+  checks:
+    name: lint, audit, unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,24 +24,9 @@ jobs:
           cache: "pip"
       - name: Install dev tooling
         run: pip install -r requirements-dev.txt
-      - name: Ruff lint
-        run: ruff check app.py static tests
-      - name: Dependency vulnerability audit (pip-audit)
-        run: pip-audit -r requirements.txt --strict
-
-  test:
-    name: pytest (unit + integration)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-      - name: Run tests with coverage
-        run: pytest tests/ --ignore=tests/e2e --cov=app --cov-report=term-missing --cov-fail-under=80 -v --tb=short
+      # Same script as a local run (ruff, pip-audit, pytest with the 80% coverage gate).
+      - name: Run checks
+        run: sh scripts/check.sh
 
   e2e:
     name: Playwright E2E
@@ -52,3 +43,20 @@ jobs:
         run: python -m playwright install --with-deps chromium
       - name: Run E2E tests
         run: pytest tests/e2e/ -v --tb=short
+
+  # The one check the rulesets require. It runs even when a job above fails and
+  # passes only if all of them passed, because GitHub can treat a *skipped*
+  # required check as passing.
+  build:
+    name: build
+    needs: [checks, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: All checks passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          echo "checks=$CHECKS e2e=$E2E"
+          [ "$CHECKS" = success ] && [ "$E2E" = success ]

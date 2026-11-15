@@ -1,20 +1,38 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. The rules in `~/projects/CLAUDE.md` apply here too. If the two ever disagree, the stricter one wins. This file holds only Crane Charts' own facts.
 
 ## Commands
 
 ```bash
-flask --debug run              # dev server on :5000 with auto-reload
-pytest tests/                  # full suite (unit + integration; 88 tests, ~1.3s)
+sh scripts/check.sh            # every CI check except E2E: ruff, pip-audit, pytest + 80% coverage gate (also `make check`)
+pytest tests/ --ignore=tests/e2e   # unit + integration (88 tests). Plain `pytest tests/` also collects E2E
 pytest tests/e2e/              # Playwright E2E suite (24 tests; requires Chromium)
-pip install -r requirements-dev.txt   # test/lint/audit tooling (not in the runtime image)
-ruff check app.py static tests        # lint gate (CI); pip-audit -r requirements.txt --strict
 pytest tests/test_app.py::TestClassName::test_name -v   # single test
-python -m playwright install chromium   # install browser once after pip install
+flask --debug run              # dev server on :5000 with auto-reload
 ```
 
-Deps: `pip install -r requirements.txt` (Flask 3.1.1, pytest, pytest-playwright). Python venv already exists at `.venv/`.
+Deps: runtime in `requirements.txt` (what the image installs); dev tooling pinned exactly in `requirements-dev.txt`. The ruff rule list is locked in `ruff.toml`. To widen it, add codes there in their own change.
+
+## CT 106 (dev box)
+
+- **Checks:** there is no pip or venv on CT 106, so run the checks in a throwaway container. The repo is mounted read-only and copied inside, because `app.py` creates `uploads/` on import:
+  ```bash
+  docker run --rm -v "$PWD":/src:ro -v ct106-pip-cache:/root/.cache/pip \
+    -e PYTHONDONTWRITEBYTECODE=1 -e PIP_ROOT_USER_ACTION=ignore python:3.12-slim \
+    sh -c 'cp -r /src /work && cd /work && pip install -q -r requirements-dev.txt && sh scripts/check.sh'
+  ```
+- **E2E:** ask the user first. Run them in Microsoft's Playwright Python image at a pinned tag, never by installing browsers on the box.
+- **Test stack:** a git-excluded `compose.yaml` (in `.git/info/exclude`) builds from the Dockerfile, keeps `/config` in the `crane-config` volume, sets `CRANE_TRUST_PROXY=0` and publishes port 5000. Start it with `docker compose up -d --build`. Test data only.
+- `.devcontainer/` is a leftover from Codespaces and is not used on CT 106.
+
+## Release
+
+- Version: the `VERSION` file (`X.Y.Z`). `CHANGELOG.md` has an `## Unreleased` section with `### Added` / `### Changed` / `### Fixed`; every PR into `dev` adds its line there.
+- A release is merging `dev` into `main`. `.github/workflows/publish-image.yml` then runs CI, fails if `vX.Y.Z` already exists, publishes `ghcr.io/huttonhomehub/crane-charts` as `X.Y.Z`, `X.Y`, `latest` and `sha-<short>` (passing `CRANE_VERSION` into the image), and creates the `vX.Y.Z` tag and GitHub Release from that CHANGELOG section. Pushing a tag publishes nothing.
+- "Ship It" follows `.claude/skills/ship-it/SKILL.md`, which sets `VERSION` and the CHANGELOG on `dev` before merging the release PR.
+- `ci.yml` runs on pushes to `dev` and `claude/**` and PRs into `dev` and `main`. Its `build` job is the one required check: it passes only if `checks` and `e2e` both passed.
+- Dependabot (`.github/dependabot.yml`) opens weekly PRs into `dev` for pip, GitHub Actions and the Python base image. New Python minor or major versions aren't proposed: changing Python also means changing `ci.yml`.
 
 **Environment variables** (all optional; defaults match original behaviour):
 - `CRANE_UPLOAD_DIR` — path to PDF storage directory (default: `uploads`)
@@ -35,7 +53,7 @@ environment:
 volumes:
   - /apps/crane-charts/config:/config
 ```
-`docker-entrypoint.sh` (R-028) remaps the image's `crane` user to `PUID`/`PGID` and chowns whatever `CRANE_UPLOAD_DIR`/`CRANE_DB` resolve to at container start, so a freshly created (or root-owned) host directory just works — no manual `chown` needed before first start.
+`/apps/crane-charts/config` is the live path on VM 113. It is documentation only: never touched from CT 106. `docker-entrypoint.sh` (R-028) remaps the image's `crane` user to `PUID`/`PGID` and chowns whatever `CRANE_UPLOAD_DIR`/`CRANE_DB` resolve to at container start, so a freshly created (or root-owned) host directory just works — no manual `chown` needed before first start.
 
 ## Architecture
 
@@ -79,7 +97,7 @@ Single-process Flask app. State is the `uploads/` directory plus `crane.db` (SQL
 - **Command palette.** `Ctrl/Cmd+K` (or clicking the search box's kbd hint) opens `#palette-modal`. `palette.run()` filters `state.files` client-side: a capacity-range query (`>=N`, `>N`, `≥N`, or `N+`) shows all cranes ≥N sorted **ascending** by capacity (`parseCapacity()` extracts the leading number); otherwise a fuzzy substring match (`terms.every(t => haystack.includes(t))`) across make/model/type/capacity. Caps 60 results; ArrowUp/Down/Enter/Escape; Enter → `openCrane()`.
 - **Deep links.** `openCrane(crane)` selects the make, opens the primary file, flushes the virtual-scroll queue, and highlights the row. `viewer.openFile()` calls `deepLink.set(id)` (sets `location.hash = '#crane/<id>'` with a suppress flag to avoid a feedback loop); `deepLink.resolve()` (run once after the initial `loadFileList()`, plus on `hashchange`) reads the hash and opens the matching crane. A share/bookmark of `…/#crane/<id>` opens that crane on load.
 
-**Versioning & cache-busting.** `APP_VERSION` (env `CRANE_VERSION`, default `dev`) is stamped into the image at build time by `docker-publish.yml` (`build-args: CRANE_VERSION=${{ steps.meta.outputs.version }}`). It shows in the app-bar (`.app-bar__version`) and at `GET /version` (also on `/health`). Templates reference `main.js`/`main.css` via the `versioned_static()` context helper, which appends `?v=<md5[:8]>` of the file's bytes — so a new deploy always serves fresh assets with no hard-refresh. `_ASSET_HASHES` caches per file; only the two app assets are versioned (the vendored pdf.js is stable).
+**Versioning & cache-busting.** `APP_VERSION` (env `CRANE_VERSION`, default `dev`) is stamped into the image at build time by `publish-image.yml`, from the `VERSION` file (`build-args: CRANE_VERSION=...`). It shows in the app-bar (`.app-bar__version`) and at `GET /version` (also on `/health`). Templates reference `main.js`/`main.css` via the `versioned_static()` context helper, which appends `?v=<md5[:8]>` of the file's bytes — so a new deploy always serves fresh assets with no hard-refresh. `_ASSET_HASHES` caches per file; only the two app assets are versioned (the vendored pdf.js is stable).
 
 **Errors as JSON.** The global `HTTPException` handler rewrites every 4xx/5xx into `{"error": "..."}`. Bare `except` clauses log via `app.logger.exception()` and return `{"error": "Internal server error"}` — never `str(e)`. The XHR client depends on JSON — do not return HTML error pages.
 
