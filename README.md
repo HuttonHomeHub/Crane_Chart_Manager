@@ -6,7 +6,7 @@ chart plus any supplementary sheets). The sidebar groups cranes hierarchically
 (Manufacturer → Type → Model); the viewer renders PDFs inline with a self-hosted PDF.js and
 can **search inside** the open document.
 
-Current release: **v1.3.2** · Image: `ghcr.io/huttonhomehub/crane-charts`
+Current release: see [CHANGELOG.md](CHANGELOG.md) or the GitHub Releases page · Image: `ghcr.io/huttonhomehub/crane-charts`
 
 ```
 ┌───────────────────────────────────────────────────────────────┐

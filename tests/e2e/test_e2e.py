@@ -13,7 +13,6 @@ from playwright.sync_api import Page, expect
 
 import app as app_module
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -55,8 +54,10 @@ def _make_text_pdf(lines) -> str:
     objs = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] "
-        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] "
+            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        ),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
         b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
     ]
@@ -69,7 +70,7 @@ def _make_text_pdf(lines) -> str:
     n = len(objs) + 1
     out += b"xref\n0 " + str(n).encode() + b"\n0000000000 65535 f \n"
     for off in offsets:
-        out += ("%010d 00000 n \n" % off).encode()
+        out += f"{off:010d} 00000 n \n".encode()
     out += b"trailer\n<< /Size " + str(n).encode() + b" /Root 1 0 R >>\nstartxref\n"
     out += str(xref_pos).encode() + b"\n%%EOF\n"
     return base64.b64encode(bytes(out)).decode()

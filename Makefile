@@ -1,4 +1,4 @@
-.PHONY: dev serve test
+.PHONY: dev serve test check
 
 # Hot-reload dev server (Flask built-in, debug mode)
 dev:
@@ -10,3 +10,7 @@ serve:
 
 test:
 	pytest tests/ -v --tb=short
+
+# Every check CI runs except E2E (see scripts/check.sh)
+check:
+	sh scripts/check.sh

@@ -4,6 +4,46 @@ All notable changes to Crane Charts. Versions are the published Docker image tag
 (`ghcr.io/huttonhomehub/crane-charts:<version>`). Rationale for the bigger decisions is in
 [docs/remediation/decision-log.md](docs/remediation/decision-log.md).
 
+Every PR into `dev` adds its line under `## Unreleased`, in `### Added`, `### Changed` or
+`### Fixed`. At release, the Ship It skill turns that section into `## vX.Y.Z — <summary>`:
+a minor bump if anything is under Added, otherwise a patch bump. The publish workflow uses
+that section as the GitHub Release notes.
+
+## Unreleased
+
+## v1.8.4 — new release flow and pinned lint tooling
+
+### Changed
+- **New release flow.** Work now lands on `dev` through pull requests, and a release is a merge
+  of `dev` into `main`. That merge runs CI, then publishes the image as `X.Y.Z`, `X.Y`,
+  `latest` and `sha-<short>` from the new `VERSION` file, and creates the `vX.Y.Z` tag and
+  GitHub Release itself. A release whose version already exists fails instead of overwriting
+  an image. Pushing a tag no longer publishes anything (`docker-publish.yml` is replaced by
+  `publish-image.yml`).
+- **CI** runs on pushes to `dev` and `claude/**` and on PRs into `dev` and `main`, and ends in
+  one `build` check that passes only if lint, audit, unit and E2E tests all passed.
+- **Dependabot** PRs now target `dev`; minor and patch bumps are grouped, and new Python
+  versions for the base image are no longer proposed automatically.
+- **Dev tooling is pinned exactly** (ruff, pytest, pytest-cov, pytest-playwright, pip-audit),
+  and the ruff rule list is locked in `ruff.toml`, so a new ruff release can't change what CI
+  enforces. `scripts/check.sh` (also `make check`) runs the same checks as CI.
+
+### Fixed
+- Lint is clean again under ruff 0.17.5: import order, one `startswith` tuple, a nested
+  `with`, %-formatting and string concatenation in tests; the five deliberate catch-all
+  `except Exception` blocks now say why. No change in behaviour.
+
+## v1.8.3 — security and ops guardrails
+- **Flask 3.1.1 → 3.1.3** fixes CVE-2026-27205, found by the new dependency scanner.
+- **CI guardrails:** `pip-audit` dependency scan, ruff lint gate and an 80% coverage gate.
+  Dependabot proposes pip, GitHub Actions and base-image updates. The base image is pinned by
+  digest, and runtime and dev dependencies are split, so the image is smaller.
+- **Hardening:** the Werkzeug debugger is opt-in (`CRANE_DEBUG`); the CSP adds
+  `object-src 'none'`; the healthcheck's request has a timeout; `/api/backup` reports the
+  backup scheduler's health.
+- **Reference deployment:** `deploy/compose.example.yml`.
+- No change to how the app behaves for users.
+
 ## v1.8.2 — palette close button + text weight
 - The **command palette** now has an **✕ close button** top-right, matching the Settings and
   Keyboard-shortcuts dialogs.

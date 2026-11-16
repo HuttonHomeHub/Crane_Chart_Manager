@@ -17,7 +17,6 @@ os.environ.setdefault('CRANE_BACKUP_ENABLED', '0')
 
 import app as app_module
 
-
 TINY_PDF = (
     b'%PDF-1.4\n'
     b'1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'

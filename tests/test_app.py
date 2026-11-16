@@ -11,7 +11,8 @@ import time
 import pytest
 
 import app as app_module
-from .conftest import upload, tiny_pdf_file, TINY_PDF
+
+from .conftest import TINY_PDF, tiny_pdf_file, upload
 
 
 def _hdrs(token):
@@ -238,27 +239,29 @@ class TestMetadataPersistence:
 
         def worker(i):
             try:
-                with app.app_context():
-                    with app_module.metadata_lock():
-                        with sqlite3.connect(app_module.DB_FILE) as c:
-                            c.row_factory = sqlite3.Row
-                            rows = [dict(r) for r in c.execute('SELECT * FROM cranes')]
-                            time.sleep(0.001)  # broaden the race window
-                            rows.append({'id': f'c{i}', 'make': f'M{i}', 'type': 'T',
-                                         'model': 'Md', 'capacity': '1t',
-                                         'uploaded_at': '2026-01-01', 'updated_at': None,
-                                         'primary_file': None})
-                            c.execute('DELETE FROM cranes')
-                            for r in rows:
-                                c.execute(
-                                    '''INSERT INTO cranes
-                                       (id, make, type, model, capacity, uploaded_at, updated_at, primary_file)
-                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                                    (r['id'], r['make'], r['type'], r['model'], r['capacity'],
-                                     r['uploaded_at'], r['updated_at'], r['primary_file']),
-                                )
-                            c.commit()
-            except Exception as e:
+                with (
+                    app.app_context(),
+                    app_module.metadata_lock(),
+                    sqlite3.connect(app_module.DB_FILE) as c,
+                ):
+                    c.row_factory = sqlite3.Row
+                    rows = [dict(r) for r in c.execute('SELECT * FROM cranes')]
+                    time.sleep(0.001)  # broaden the race window
+                    rows.append({'id': f'c{i}', 'make': f'M{i}', 'type': 'T',
+                                 'model': 'Md', 'capacity': '1t',
+                                 'uploaded_at': '2026-01-01', 'updated_at': None,
+                                 'primary_file': None})
+                    c.execute('DELETE FROM cranes')
+                    for r in rows:
+                        c.execute(
+                            '''INSERT INTO cranes
+                               (id, make, type, model, capacity, uploaded_at, updated_at, primary_file)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                            (r['id'], r['make'], r['type'], r['model'], r['capacity'],
+                             r['uploaded_at'], r['updated_at'], r['primary_file']),
+                        )
+                    c.commit()
+            except Exception as e:  # noqa: BLE001 — collect any worker failure for the assert below
                 errors.append((i, repr(e)))
 
         threads = [threading.Thread(target=worker, args=(i,)) for i in range(N)]
@@ -436,7 +439,7 @@ class TestDeleteFileLock:
                 r = upload(client, csrf, make=f'New{i}', type_='T', model='M', capacity='2t')
                 if r.status_code != 201:
                     errors.append(('upload', i, r.json))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — collect any worker failure for the assert below
                 errors.append(('upload_exc', i, repr(e)))
 
         def do_delete(name):
@@ -448,7 +451,7 @@ class TestDeleteFileLock:
                 )
                 if r.status_code not in (200, 404):
                     errors.append(('delete', name, r.json))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — collect any worker failure for the assert below
                 errors.append(('delete_exc', name, repr(e)))
 
         threads = (
@@ -592,8 +595,8 @@ class TestBackup:
 
     def test_backup_snapshot_is_readable_sqlite(self, app, client, csrf):
         """The DB inside the backup is a valid, queryable SQLite snapshot."""
-        import zipfile
         import tempfile
+        import zipfile
         upload(client, csrf, make='Snap', model='SX1', capacity='9t')
         path = app_module.create_backup()
         with zipfile.ZipFile(path) as z:

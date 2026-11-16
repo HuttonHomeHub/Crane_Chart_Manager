@@ -1,10 +1,3 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory, g, url_for
-from werkzeug.exceptions import HTTPException, NotFound, RequestEntityTooLarge
-from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.utils import secure_filename
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from pythonjsonlogger.json import JsonFormatter
 import contextlib
 import hashlib
 import json
@@ -19,6 +12,14 @@ import threading
 import time
 import zipfile
 from datetime import datetime
+
+from flask import Flask, g, jsonify, render_template, request, send_from_directory, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from pythonjsonlogger.json import JsonFormatter
+from werkzeug.exceptions import HTTPException, NotFound, RequestEntityTooLarge
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 
 # Release version. The Docker build passes CRANE_VERSION from the image tag;
 # 'dev' locally. Shown in the UI and at GET /version, and drives asset cache-busting.
@@ -640,8 +641,7 @@ def _classify_backup_members(zf):
             continue  # directory entry
         # Reject anything that would escape the extraction root.
         norm = os.path.normpath(name)
-        if os.path.isabs(name) or norm.startswith('..') or '..' in norm.split(os.sep) \
-                or norm.startswith('/'):
+        if os.path.isabs(name) or norm.startswith(('..', '/')) or '..' in norm.split(os.sep):
             raise ValueError(f'unsafe path in backup: {name}')
         total += info.file_size
         if total > MAX_RESTORE_UNCOMPRESSED:
@@ -1357,7 +1357,7 @@ def instance_info():
         with sqlite3.connect(DB_FILE) as conn:
             cranes = conn.execute('SELECT COUNT(*) FROM cranes').fetchone()[0]
             files = conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
-    except Exception:
+    except Exception:  # noqa: BLE001 — the Settings panel must still load if the DB is broken
         cranes = files = -1
     return jsonify({
         'version': APP_VERSION,
@@ -1380,7 +1380,7 @@ def health():
     try:
         with sqlite3.connect(DB_FILE) as conn:
             upload_count = conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
-    except Exception:
+    except Exception:  # noqa: BLE001 — the liveness probe must answer even if the DB is broken
         upload_count = -1
     return jsonify({'status': 'ok', 'uploads': upload_count, 'version': APP_VERSION}), 200
 
