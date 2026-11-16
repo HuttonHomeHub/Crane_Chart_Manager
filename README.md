@@ -81,6 +81,15 @@ In this deployment that's **tinyauth** via an nginx `auth_request` on every path
 `location /` must forward `X-Forwarded-Proto`/`X-Forwarded-For`/`Host` for `CRANE_TRUST_PROXY=1`
 to work (the CSRF cookie's `Secure` flag and rate-limit keying depend on it).
 
+**Behind Cloudflare.** With Cloudflare in front of nginx, nginx must restore the visitor's IP
+before forwarding: `set_real_ip_from` for each of Cloudflare's ranges
+([IPv4](https://www.cloudflare.com/ips-v4), [IPv6](https://www.cloudflare.com/ips-v6)) plus
+`real_ip_header CF-Connecting-IP;`, then `proxy_set_header X-Forwarded-For $remote_addr;`.
+Otherwise the one hop `CRANE_TRUST_PROXY=1` trusts is a Cloudflare server, and rate limits are
+keyed on Cloudflare's IP instead of the visitor's. PhotoMapper runs behind the same proxy the
+same way; its [deployment doc](https://github.com/HuttonHomeHub/PhotoMapper/blob/dev/docs/DEPLOYMENT-SECURITY.md#behind-cloudflare-restore-the-real-client-ip-in-nginx)
+has the full nginx snippet.
+
 ### Environment variables
 
 | Var | Default | Purpose |
