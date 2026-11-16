@@ -11,6 +11,18 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+## v1.8.5 — gunicorn 27, dependency updates and Cloudflare docs
+
+### Changed
+- **gunicorn 27** (from 23), with its control socket turned off (`--no-control-socket`): it's
+  unused here and only logged a permission error at startup.
+- **Docs: real client IP behind Cloudflare.** nginx restores the visitor's IP from
+  `CF-Connecting-IP`, so `CRANE_TRUST_PROXY=1` (one hop) sees the real client and rate limits
+  are per visitor. Same setup as PhotoMapper.
+- **Dependency updates** (Dependabot): Flask-Limiter 4.1 (#16), python-json-logger 4.2 (#15),
+  a newer `python:3.12-slim` base image digest (#11), and the `actions/setup-python` 7 (#13)
+  and `docker/build-push-action` 7 (#12) GitHub Actions.
+
 ## v1.8.4 — new release flow and pinned lint tooling
 
 ### Changed

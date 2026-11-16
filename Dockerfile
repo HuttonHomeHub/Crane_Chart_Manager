@@ -1,7 +1,7 @@
 # SEC-DEP-03: base image pinned by digest for reproducible, drift-free builds.
 # Digest is python:3.12-slim (captured 2026-07-08); refresh with:
 #   docker pull python:3.12-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
-FROM python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 RUN useradd --create-home --shell /bin/bash crane
 
@@ -39,4 +39,7 @@ ENTRYPOINT ["./docker-entrypoint.sh"]
 # silently multiplying the configured limits (e.g. 10/min becomes ~10/min per worker).
 # A single-user internal tool doesn't need the concurrency a second worker buys;
 # if that changes, switch storage_uri to a shared backend (e.g. Redis) first.
-CMD ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "app:app"]
+# --no-control-socket: gunicorn 25.1+ opens a control socket (for `gunicornc`) under
+# $HOME, which is /root here after setpriv drops to the crane user, so it only logs a
+# permission error. Nothing uses gunicornc, so it stays off.
+CMD ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "--no-control-socket", "app:app"]
