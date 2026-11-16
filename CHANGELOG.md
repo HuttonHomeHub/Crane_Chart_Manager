@@ -11,6 +11,8 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+## v1.9.0 — shared container standard: unprefixed settings, all state in /config
+
 ### Added
 - **`TRUST_PROXY` takes a hop count** (`0`, `1`, `2` …) instead of just on/off, and
   **`LOG_LEVEL`** (`fatal`, `error`, `warn`, `info`, `debug`) sets how much is logged. Both use
