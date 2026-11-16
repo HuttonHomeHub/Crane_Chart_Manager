@@ -11,6 +11,8 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+## v1.8.4 — new release flow and pinned lint tooling
+
 ### Changed
 - **New release flow.** Work now lands on `dev` through pull requests, and a release is a merge
   of `dev` into `main`. That merge runs CI, then publishes the image as `X.Y.Z`, `X.Y`,
