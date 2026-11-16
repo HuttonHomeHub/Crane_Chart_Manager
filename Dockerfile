@@ -39,4 +39,7 @@ ENTRYPOINT ["./docker-entrypoint.sh"]
 # silently multiplying the configured limits (e.g. 10/min becomes ~10/min per worker).
 # A single-user internal tool doesn't need the concurrency a second worker buys;
 # if that changes, switch storage_uri to a shared backend (e.g. Redis) first.
-CMD ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "app:app"]
+# --no-control-socket: gunicorn 25.1+ opens a control socket (for `gunicornc`) under
+# $HOME, which is /root here after setpriv drops to the crane user, so it only logs a
+# permission error. Nothing uses gunicornc, so it stays off.
+CMD ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "--no-control-socket", "app:app"]

@@ -11,6 +11,13 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+### Changed
+- **gunicorn 27** (from 23), with its control socket turned off (`--no-control-socket`): it's
+  unused here and only logged a permission error at startup.
+- **Dependency updates** (Dependabot): Flask-Limiter 4.1 (#16), python-json-logger 4.2 (#15),
+  a newer `python:3.12-slim` base image digest (#11), and the `actions/setup-python` 7 (#13)
+  and `docker/build-push-action` 7 (#12) GitHub Actions.
+
 ## v1.8.4 — new release flow and pinned lint tooling
 
 ### Changed
