@@ -11,6 +11,8 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+## v1.8.5 — gunicorn 27, dependency updates and Cloudflare docs
+
 ### Changed
 - **gunicorn 27** (from 23), with its control socket turned off (`--no-control-socket`): it's
   unused here and only logged a permission error at startup.
