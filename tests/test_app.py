@@ -5,6 +5,8 @@ import io
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
 
@@ -829,6 +831,7 @@ class TestInstanceInfo:
         assert body['files'] == 1
         assert 'database' in body['paths'] and 'uploads' in body['paths']
         assert body['limits']['max_upload_mb'] == app_module.MAX_CONTENT_LENGTH // (1024 * 1024)
+        assert body['trust_proxy'] is False and body['trust_proxy_hops'] == 0
 
 
 # ----------------------------------------------------------------------
@@ -1032,3 +1035,113 @@ class TestMultiFile:
             headers=_hdrs(csrf),
         )
         assert r.status_code == 404
+
+
+# ----------------------------------------------------------------------
+# Shared container standard: unprefixed settings, old CRANE_ names as fallbacks
+# ----------------------------------------------------------------------
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _import_app_with(tmp_path, extra_env, code):
+    """Import app.py in a fresh interpreter with a clean CRANE_/standard env."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith('CRANE_') and k not in (
+               'DATA_DIR', 'DB_PATH', 'UPLOADS_DIR', 'BACKUP_DIR', 'TRUST_PROXY', 'LOG_LEVEL',
+               'APP_VERSION', 'BACKUP_KEEP')}
+    env.update({'BACKUP_ENABLED': '0', 'PYTHONDONTWRITEBYTECODE': '1'}, **extra_env)
+    return subprocess.run(
+        [sys.executable, '-c', 'import app\n' + code],
+        cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60)
+
+
+class TestSettings:
+    def test_env_prefers_standard_name(self, monkeypatch):
+        monkeypatch.setattr(app_module, '_LEGACY_ENV_USED', [])
+        monkeypatch.setenv('BACKUP_KEEP', '3')
+        monkeypatch.setenv('CRANE_BACKUP_KEEP', '9')
+        assert app_module.env('BACKUP_KEEP') == '3'
+        assert app_module._LEGACY_ENV_USED == []
+
+    def test_env_falls_back_to_old_name_and_records_it(self, monkeypatch):
+        monkeypatch.setattr(app_module, '_LEGACY_ENV_USED', [])
+        monkeypatch.delenv('BACKUP_KEEP', raising=False)
+        monkeypatch.setenv('CRANE_BACKUP_KEEP', '9')
+        assert app_module.env('BACKUP_KEEP') == '9'
+        assert app_module._LEGACY_ENV_USED == [('CRANE_BACKUP_KEEP', 'BACKUP_KEEP')]
+
+    @pytest.mark.parametrize('new,old', [
+        ('DB_PATH', 'CRANE_DB'), ('UPLOADS_DIR', 'CRANE_UPLOAD_DIR'),
+        ('APP_VERSION', 'CRANE_VERSION'), ('TRUST_PROXY', 'CRANE_TRUST_PROXY'),
+    ])
+    def test_renamed_settings_map_to_their_old_names(self, monkeypatch, new, old):
+        monkeypatch.setattr(app_module, '_LEGACY_ENV_USED', [])
+        monkeypatch.delenv(new, raising=False)
+        monkeypatch.setenv(old, 'x')
+        assert app_module.env(new) == 'x'
+
+    def test_env_default_when_neither_set(self, monkeypatch):
+        monkeypatch.delenv('MAX_FIELD_LEN', raising=False)
+        monkeypatch.delenv('CRANE_MAX_FIELD_LEN', raising=False)
+        assert app_module.env('MAX_FIELD_LEN', '64') == '64'
+
+    @pytest.mark.parametrize('raw,hops', [
+        (None, 0), ('', 0), ('0', 0), ('false', 0), ('1', 1), ('true', 1), ('2', 2), (' 3 ', 3),
+    ])
+    def test_trust_proxy_hop_count(self, monkeypatch, raw, hops):
+        monkeypatch.delenv('CRANE_TRUST_PROXY', raising=False)
+        if raw is None:
+            monkeypatch.delenv('TRUST_PROXY', raising=False)
+        else:
+            monkeypatch.setenv('TRUST_PROXY', raw)
+        assert app_module.trust_proxy_hops() == hops
+
+    def test_trust_proxy_rejects_non_numbers(self, monkeypatch):
+        monkeypatch.setenv('TRUST_PROXY', 'loopback')
+        with pytest.raises(SystemExit):
+            app_module.trust_proxy_hops()
+
+    def test_data_dir_sets_default_paths(self, tmp_path):
+        r = _import_app_with(tmp_path, {'DATA_DIR': str(tmp_path)},
+                             'print(app.DB_FILE); print(app.UPLOAD_FOLDER); print(app.BACKUP_DIR)')
+        assert r.returncode == 0, r.stderr
+        db, uploads, backups = r.stdout.split()
+        assert db == os.path.join(str(tmp_path), 'crane.db')
+        assert uploads == os.path.join(str(tmp_path), 'uploads')
+        assert backups == os.path.join(str(tmp_path), 'backups')
+
+    def test_old_names_still_work_and_log_a_warning(self, tmp_path):
+        r = _import_app_with(tmp_path, {
+            'CRANE_DB': str(tmp_path / 'old.db'), 'CRANE_UPLOAD_DIR': str(tmp_path / 'up'),
+            'CRANE_TRUST_PROXY': '1'},
+            'print(app.DB_FILE); print(app.UPLOAD_FOLDER); print(app.TRUST_PROXY_HOPS)')
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.split() == [str(tmp_path / 'old.db'), str(tmp_path / 'up'), '1']
+        assert 'setting CRANE_DB is deprecated; use DB_PATH' in r.stderr
+        assert 'setting CRANE_TRUST_PROXY is deprecated; use TRUST_PROXY' in r.stderr
+
+    @pytest.mark.parametrize('level,expected', [('warn', 'WARNING'), ('debug', 'DEBUG'), ('info', 'INFO')])
+    def test_log_level(self, tmp_path, level, expected):
+        r = _import_app_with(tmp_path, {'DATA_DIR': str(tmp_path), 'LOG_LEVEL': level},
+                             'import logging; print(logging.getLevelName(logging.getLogger().level))')
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == expected
+
+    def test_bad_log_level_stops_startup(self, tmp_path):
+        r = _import_app_with(tmp_path, {'DATA_DIR': str(tmp_path), 'LOG_LEVEL': 'loud'}, 'pass')
+        assert r.returncode != 0
+        assert 'LOG_LEVEL must be one of' in r.stderr
+
+    def test_two_proxy_hops_use_the_client_ip(self, tmp_path):
+        code = (
+            'c = app.app.test_client()\n'
+            'from flask import request\n'
+            '@app.app.get("/_ip")\n'
+            'def _ip():\n'
+            '    return request.remote_addr\n'
+            'print(c.get("/_ip", headers={"X-Forwarded-For": "203.0.113.7, 172.71.0.1"}).text)'
+        )
+        r = _import_app_with(tmp_path, {'DATA_DIR': str(tmp_path), 'TRUST_PROXY': '2'}, code)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == '203.0.113.7'

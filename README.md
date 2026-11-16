@@ -47,83 +47,99 @@ Current release: see [CHANGELOG.md](CHANGELOG.md) or the GitHub Releases page ·
 
 ## Deploy (Docker)
 
-The published image has no hardcoded data path. Point `CRANE_UPLOAD_DIR`/`CRANE_DB` at one
-mounted directory (this stack's `/config` convention). A `docker-compose` service:
+The image follows the shared HuttonHomeHub container standard: all state lives under `/config`
+(the database, `uploads/` and `backups/`), and settings shared with the other apps have the same
+names everywhere (`PUID`, `PGID`, `TZ`, `TRUST_PROXY`, `LOG_LEVEL`). A `docker-compose` service
+(also in [deploy/compose.example.yml](deploy/compose.example.yml)):
 
 ```yaml
 services:
   crane-charts:
     container_name: crane-charts
-    image: ghcr.io/huttonhomehub/crane-charts:1.3.2   # or :latest
+    image: ghcr.io/huttonhomehub/crane-charts:latest   # or pin a version, e.g. :1.9.0
     ports:
       - 5000:5000
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/London
-      - CRANE_TRUST_PROXY=1              # required when behind a reverse proxy (nginx)
-      - CRANE_UPLOAD_DIR=/config/uploads
-      - CRANE_DB=/config/crane.db
+      - TRUST_PROXY=1          # proxy hops in front (1 = nginx); 0 = no proxy
     volumes:
       - /apps/crane-charts/config:/config
     restart: unless-stopped
 ```
 
 `docker-entrypoint.sh` remaps the image's `crane` user to `PUID`/`PGID` and fixes ownership
-of the mounted directory at start, so a fresh or root-owned host directory just works — no
+of the data directories at start, so a fresh or root-owned host directory just works — no
 manual `chown`. Deploying an update is `docker compose pull crane-charts && docker compose up -d
-crane-charts`; assets are cache-busted, so no hard-refresh is needed (from v1.3.2 on). Confirm
-the running version with the badge in the app-bar or `curl https://<host>/version`.
+crane-charts`; assets are cache-busted, so no hard-refresh is needed. Confirm the running
+version with the badge in the app-bar or `curl https://<host>/version`.
 
 **Access control.** The app has no login of its own — it is designed to sit behind a gate.
 In this deployment that's **tinyauth** via an nginx `auth_request` on every path (see
 [docs/remediation/risk-register.md](docs/remediation/risk-register.md), RR-001). The nginx
-`location /` must forward `X-Forwarded-Proto`/`X-Forwarded-For`/`Host` for `CRANE_TRUST_PROXY=1`
+`location /` must forward `X-Forwarded-Proto`/`X-Forwarded-For`/`Host` for `TRUST_PROXY=1`
 to work (the CSRF cookie's `Secure` flag and rate-limit keying depend on it).
 
 **Behind Cloudflare.** With Cloudflare in front of nginx, nginx must restore the visitor's IP
 before forwarding: `set_real_ip_from` for each of Cloudflare's ranges
 ([IPv4](https://www.cloudflare.com/ips-v4), [IPv6](https://www.cloudflare.com/ips-v6)) plus
 `real_ip_header CF-Connecting-IP;`, then `proxy_set_header X-Forwarded-For $remote_addr;`.
-Otherwise the one hop `CRANE_TRUST_PROXY=1` trusts is a Cloudflare server, and rate limits are
+Otherwise the one hop `TRUST_PROXY=1` trusts is a Cloudflare server, and rate limits are
 keyed on Cloudflare's IP instead of the visitor's. PhotoMapper runs behind the same proxy the
 same way; its [deployment doc](https://github.com/HuttonHomeHub/PhotoMapper/blob/dev/docs/DEPLOYMENT-SECURITY.md#behind-cloudflare-restore-the-real-client-ip-in-nginx)
 has the full nginx snippet.
 
 ### Environment variables
 
+Shared with every HuttonHomeHub app (same name and meaning everywhere):
+
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `CRANE_UPLOAD_DIR` | `uploads` | PDF storage directory |
-| `CRANE_DB` | `crane.db` | SQLite database path |
-| `CRANE_MAX_UPLOAD_MB` | `500` | Max upload size (MB) |
-| `CRANE_MAX_FIELD_LEN` | `64` | Max characters per metadata field |
-| `CRANE_UPLOAD_RATE` / `CRANE_WRITE_RATE` | `60 per minute` | Flask-Limiter limits for upload / other mutations |
-| `CRANE_TRUST_PROXY` | `0` | Set `1` **only** behind a single reverse-proxy hop |
-| `CRANE_VERSION` | `dev` | Release label (set from the image tag at build time) |
-| `CRANE_BACKUP_DIR` | `<data>/backups` | Where periodic backups are written |
-| `CRANE_BACKUP_INTERVAL_HOURS` | `24` | Backup interval |
-| `CRANE_BACKUP_KEEP` | `7` | How many backups to retain |
-| `CRANE_BACKUP_ENABLED` | `1` | Set `0` to disable the backup scheduler |
-| `CRANE_BACKUP_INCLUDE_UPLOADS` | `1` | Set `0` for DB-only backups (when PDFs live on snapshotting storage) |
-| `CRANE_MAX_RESTORE_MB` | `4096` | Max uncompressed size of a restore archive (zip-bomb guard) |
+| `PUID` / `PGID` | `1000` | User and group the app runs as; data directories are chowned to them |
+| `TZ` | UTC | Time zone for logs and timestamps, e.g. `Europe/London` |
+| `TRUST_PROXY` | `0` | Number of reverse-proxy hops in front whose `X-Forwarded-*` headers are trusted. `0` = none. Never set it higher than the real number of proxies |
+| `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug` (also `trace`, `silent`) |
+| `DATA_DIR` | `/config` in the image | Where all state lives; the next two default inside it |
+| `DB_PATH` | `$DATA_DIR/crane.db` | SQLite database file |
+| `UPLOADS_DIR` | `$DATA_DIR/uploads` | PDF storage directory |
+| `APP_VERSION` | `dev` | Release version, set from the image tag at build time |
+
+Crane Charts only:
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `MAX_UPLOAD_MB` | `500` | Max upload size (MB) |
+| `MAX_FIELD_LEN` | `64` | Max characters per metadata field |
+| `UPLOAD_RATE` / `WRITE_RATE` | `60 per minute` | Flask-Limiter limits for upload / other mutations |
+| `BACKUP_DIR` | `<db dir>/backups` | Where periodic backups are written |
+| `BACKUP_INTERVAL_HOURS` | `24` | Backup interval |
+| `BACKUP_KEEP` | `7` | How many backups to retain |
+| `BACKUP_ENABLED` | `1` | Set `0` to disable the backup scheduler |
+| `BACKUP_INCLUDE_UPLOADS` | `1` | Set `0` for DB-only backups (when PDFs live on snapshotting storage) |
+| `MAX_RESTORE_MB` | `4096` | Max uncompressed size of a restore archive (zip-bomb guard) |
+| `DEBUG` | `0` | `1` enables the Werkzeug debugger for `python app.py` only (never in production) |
+
+The old `CRANE_`-prefixed names (`CRANE_TRUST_PROXY`, `CRANE_DB`, `CRANE_UPLOAD_DIR`,
+`CRANE_BACKUP_KEEP`, …) still work. Each one in use logs a one-line "deprecated" warning at
+startup, naming its replacement. A new name always wins over an old one.
 
 ### Backups & restore
 
 The app writes periodic **full backups** — a consistent `crane.db` snapshot plus a zip of
-`uploads/` — to `CRANE_BACKUP_DIR`, pruned to `CRANE_BACKUP_KEEP`. The **Settings** panel (the
+`uploads/` — to `BACKUP_DIR`, pruned to `BACKUP_KEEP`. The **Settings** panel (the
 app-bar gear) shows backup status, a "Back up now" button, and a list of existing backups you can
 download or **Restore** in place — plus an **Upload & restore** control to recover from a
 downloaded zip on a fresh instance. A restore replaces the whole catalogue (database + PDFs) and
 first takes a `…-prerestore.zip` safety backup, so it's reversible. (You can still restore by hand
 if you prefer — `crane.db` and `uploads/` sit at the zip root.)
 
-For real safety, point `CRANE_BACKUP_DIR` at a **separate mount** (e.g. a NAS share) so a
+For real safety, point `BACKUP_DIR` at a **separate mount** (e.g. a NAS share) so a
 single-disk failure doesn't take the backups with it:
 
 ```yaml
     environment:
-      - CRANE_BACKUP_DIR=/backups
+      - BACKUP_DIR=/backups
     volumes:
       - /apps/crane-charts/config:/config
       - /mnt/truenas/crane-backups:/backups
@@ -131,20 +147,19 @@ single-disk failure doesn't take the backups with it:
 
 Note: keep the *live* `crane.db` on local/block storage — SQLite's WAL locking is unreliable
 over NFS/SMB. The PDFs, being plain write-once files, are safe on a network share, so a good
-split is **DB local, `CRANE_UPLOAD_DIR` on a NAS**:
+split is **DB local, `UPLOADS_DIR` on a NAS**:
 
 ```yaml
     environment:
-      - CRANE_DB=/config/crane.db               # database → local
-      - CRANE_UPLOAD_DIR=/pdfs                   # PDFs → NAS
-      - CRANE_BACKUP_INCLUDE_UPLOADS=0           # NAS/ZFS already snapshots the PDFs
+      - UPLOADS_DIR=/pdfs                  # PDFs → NAS (the database stays in /config)
+      - BACKUP_INCLUDE_UPLOADS=0           # NAS/ZFS already snapshots the PDFs
     volumes:
       - /apps/crane-charts/config:/config
       - /mnt/truenas/crane-pdfs:/pdfs
 ```
 
 With PDFs on storage that snapshots itself (e.g. TrueNAS/ZFS), set
-`CRANE_BACKUP_INCLUDE_UPLOADS=0` so backups are DB-only — small and fast — and rely on the
+`BACKUP_INCLUDE_UPLOADS=0` so backups are DB-only — small and fast — and rely on the
 NAS's own snapshots for the documents.
 
 ## Develop
