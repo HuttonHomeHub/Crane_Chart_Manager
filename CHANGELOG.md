@@ -11,6 +11,25 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+## v1.9.0 — shared container standard: unprefixed settings, all state in /config
+
+### Added
+- **`TRUST_PROXY` takes a hop count** (`0`, `1`, `2` …) instead of just on/off, and
+  **`LOG_LEVEL`** (`fatal`, `error`, `warn`, `info`, `debug`) sets how much is logged. Both use
+  the same names and values as PhotoMapper. `/api/info` adds `trust_proxy_hops`.
+
+### Changed
+- **Settings follow the shared container standard:** unprefixed names, the same in every app.
+  `CRANE_DB` → `DB_PATH`, `CRANE_UPLOAD_DIR` → `UPLOADS_DIR`, `CRANE_TRUST_PROXY` →
+  `TRUST_PROXY`, `CRANE_VERSION` → `APP_VERSION`, and every other `CRANE_X` → `X` (for example
+  `BACKUP_KEEP`, `MAX_UPLOAD_MB`). **The old names still work** and log a one-line warning
+  naming the replacement.
+- **The image keeps all state under `/config` by default** (`DATA_DIR=/config`): the database,
+  `uploads/` and `backups/`. A deployment only mounts `/config` and no longer needs to set the
+  database or uploads paths. The stray anonymous volume for `/app/uploads` is gone.
+- **`deploy/compose.example.yml`** now matches the live layout (published port, one `/config`
+  mount, shared settings).
+
 ## v1.8.5 — gunicorn 27, dependency updates and Cloudflare docs
 
 ### Changed

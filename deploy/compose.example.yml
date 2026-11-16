@@ -1,32 +1,31 @@
-# REM-OPS-02: reference deployment for Crane Charts.
-# The published image has no hardcoded data path — point CRANE_UPLOAD_DIR/CRANE_DB at a
-# single mounted /config dir to match this stack's convention. See CLAUDE.md.
+# Reference deployment for Crane Charts, in the shared container standard used by every
+# HuttonHomeHub app (see the README's "Configuration"):
+#   - all state under /config (database, uploads/, backups/), so only one volume
+#   - shared settings with the same name in every app: PUID, PGID, TZ, TRUST_PROXY, LOG_LEVEL
 #
-# Security note (RR-001): the app has NO built-in authentication. It MUST sit behind an
-# authenticating reverse proxy (e.g. nginx + tinyauth). Do not expose port 5000 directly.
+# Security note (RR-001): the app has NO built-in authentication. It must sit behind an
+# authenticating reverse proxy (here nginx + tinyauth). The published port should only be
+# reachable by that proxy (bind it to the proxy's network, or firewall it to the proxy's IP).
 services:
   crane-charts:
-    image: ghcr.io/huttonhomehub/crane-charts:latest   # pin to a version tag in production
     container_name: crane-charts
-    restart: unless-stopped
+    image: ghcr.io/huttonhomehub/crane-charts:latest   # or pin a version, e.g. :1.9.0
+    ports:
+      - 5000:5000
     environment:
       - PUID=1000
       - PGID=1000
-      # Set to 1 ONLY when behind a single reverse-proxy hop that sets X-Forwarded-*.
-      - CRANE_TRUST_PROXY=1
-      - CRANE_UPLOAD_DIR=/config/uploads
-      - CRANE_DB=/config/crane.db
-      # Backups (RR-010). Point CRANE_BACKUP_DIR at a *separate* mount for off-host copies.
-      - CRANE_BACKUP_DIR=/config/backups
-      # - CRANE_BACKUP_INTERVAL_HOURS=24
-      # - CRANE_BACKUP_KEEP=7
-      # - CRANE_BACKUP_INCLUDE_UPLOADS=1   # 0 = DB-only (when uploads/ is on snapshotting storage)
-      # - CRANE_MAX_UPLOAD_MB=500
+      - TZ=Europe/London
+      # Proxy hops in front of the app. 1 = nginx, which restores the real client IP
+      # from Cloudflare (see the README's "Behind Cloudflare"). 0 = no proxy.
+      - TRUST_PROXY=1
+      # - LOG_LEVEL=info              # fatal | error | warn | info | debug
+      # App-only settings (defaults shown):
+      # - BACKUP_INTERVAL_HOURS=24
+      # - BACKUP_KEEP=7
+      # - BACKUP_INCLUDE_UPLOADS=1    # 0 = DB-only (when uploads/ is on snapshotting storage)
+      # - BACKUP_DIR=/backups         # a separate mount for off-host copies (default /config/backups)
+      # - MAX_UPLOAD_MB=500
     volumes:
       - /apps/crane-charts/config:/config
-    # No published ports here on purpose — attach to the proxy's network instead, e.g.:
-    # networks: [proxy]
-    # expose: ["5000"]
-# networks:
-#   proxy:
-#     external: true
+    restart: unless-stopped

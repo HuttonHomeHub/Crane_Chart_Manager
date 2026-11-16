@@ -14,7 +14,7 @@ import pytest
 from werkzeug.serving import make_server
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-os.environ.setdefault('CRANE_BACKUP_ENABLED', '0')  # no backup thread during E2E
+os.environ.setdefault('BACKUP_ENABLED', '0')  # no backup thread during E2E
 import app as app_module
 
 

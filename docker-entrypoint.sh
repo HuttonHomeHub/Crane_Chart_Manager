@@ -17,16 +17,20 @@ if [ "$(id -u crane)" != "$PUID" ]; then
     usermod -o -u "$PUID" crane
 fi
 
-UPLOAD_DIR="${CRANE_UPLOAD_DIR:-uploads}"
-DB_FILE="${CRANE_DB:-crane.db}"
+# Same resolution as app.py: the standard name, then the old CRANE_ name, then a
+# default inside DATA_DIR (/config in the image).
+DATA_DIR="${DATA_DIR:-.}"
+UPLOAD_DIR="${UPLOADS_DIR:-${CRANE_UPLOAD_DIR:-$DATA_DIR/uploads}}"
+DB_FILE="${DB_PATH:-${CRANE_DB:-$DATA_DIR/crane.db}}"
 DB_DIR="$(dirname "$DB_FILE")"
+BACKUPS="${BACKUP_DIR:-${CRANE_BACKUP_DIR:-$DB_DIR/backups}}"
 
-mkdir -p "$UPLOAD_DIR" "$DB_DIR"
+mkdir -p "$UPLOAD_DIR" "$DB_DIR" "$BACKUPS"
 
 # Only chown (recursively) directories that aren't already owned by the target
 # user — avoids an expensive walk of a large uploads/ tree on every restart once
 # ownership is already correct.
-for d in "$UPLOAD_DIR" "$DB_DIR"; do
+for d in "$UPLOAD_DIR" "$DB_DIR" "$BACKUPS"; do
     owner="$(stat -c '%u' "$d")"
     if [ "$owner" != "$PUID" ]; then
         chown -R "$PUID:$PGID" "$d"

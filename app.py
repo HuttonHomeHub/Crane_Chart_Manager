@@ -21,26 +21,71 @@ from werkzeug.exceptions import HTTPException, NotFound, RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
-# Release version. The Docker build passes CRANE_VERSION from the image tag;
+# Settings come from environment variables, named to the shared container standard
+# in ~/projects/CLAUDE.md: unprefixed, and the same name in every app for the same
+# idea (DATA_DIR, DB_PATH, UPLOADS_DIR, TRUST_PROXY, LOG_LEVEL, APP_VERSION ...).
+# The old CRANE_-prefixed names still work as fallbacks and log a one-line warning.
+_LEGACY_ENV_USED = []
+# Old names that weren't just CRANE_ + the new name.
+_LEGACY_NAMES = {'DB_PATH': 'CRANE_DB', 'UPLOADS_DIR': 'CRANE_UPLOAD_DIR',
+                 'APP_VERSION': 'CRANE_VERSION'}
+
+
+def env(name, default=None):
+    """Read setting NAME, falling back to its old CRANE_-prefixed name."""
+    value = os.environ.get(name)
+    if value is not None:
+        return value
+    legacy = _LEGACY_NAMES.get(name, 'CRANE_' + name)
+    value = os.environ.get(legacy)
+    if value is not None:
+        _LEGACY_ENV_USED.append((legacy, name))
+        return value
+    return default
+
+
+def trust_proxy_hops():
+    """TRUST_PROXY as a hop count: 0/unset/false = off, 'true' = 1, N = N hops."""
+    raw = (env('TRUST_PROXY', '0') or '0').strip().lower()
+    if raw in ('', '0', 'false', 'no', 'off'):
+        return 0
+    if raw in ('true', 'yes', 'on'):
+        return 1
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        raise SystemExit(f'TRUST_PROXY must be a hop count (0, 1, 2 ...), got {raw!r}') from None
+
+
+# Release version. The Docker build passes APP_VERSION from the image tag;
 # 'dev' locally. Shown in the UI and at GET /version, and drives asset cache-busting.
-APP_VERSION = os.environ.get('CRANE_VERSION', 'dev')
+APP_VERSION = env('APP_VERSION', 'dev')
 
 app = Flask(__name__)
 
 # R-027: when running behind a reverse proxy (e.g. nginx), Flask otherwise sees the
 # proxy's own IP/scheme rather than the real client's — silently breaking the CSRF
 # cookie's Secure flag (request.is_secure) and rate-limit keying (get_remote_address).
-# Only trust X-Forwarded-* when explicitly told there's exactly one proxy hop in front;
+# Only trust X-Forwarded-* when told how many proxy hops sit in front (TRUST_PROXY);
 # trusting them unconditionally would let any client spoof its own IP/scheme.
-if os.environ.get('CRANE_TRUST_PROXY', '0') == '1':
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+TRUST_PROXY_HOPS = trust_proxy_hops()
+if TRUST_PROXY_HOPS:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUST_PROXY_HOPS, x_proto=TRUST_PROXY_HOPS,
+                            x_host=TRUST_PROXY_HOPS)
 
 # R-022: structured JSON logging — one line per request, machine-readable.
 _handler = logging.StreamHandler()
 _handler.setFormatter(JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
 logging.getLogger().addHandler(_handler)
-logging.getLogger().setLevel(logging.INFO)
-app.logger.setLevel(logging.INFO)
+# LOG_LEVEL uses the shared names (fatal, error, warn, info, debug, trace, silent).
+_LOG_LEVELS = {'fatal': logging.CRITICAL, 'error': logging.ERROR, 'warn': logging.WARNING,
+               'warning': logging.WARNING, 'info': logging.INFO, 'debug': logging.DEBUG,
+               'trace': logging.DEBUG, 'silent': logging.CRITICAL + 10}
+LOG_LEVEL = (env('LOG_LEVEL', 'info') or 'info').strip().lower()
+if LOG_LEVEL not in _LOG_LEVELS:
+    raise SystemExit(f'LOG_LEVEL must be one of {", ".join(_LOG_LEVELS)}, got {LOG_LEVEL!r}')
+logging.getLogger().setLevel(_LOG_LEVELS[LOG_LEVEL])
+app.logger.setLevel(_LOG_LEVELS[LOG_LEVEL])
 
 limiter = Limiter(
     get_remote_address,
@@ -135,32 +180,35 @@ def _csp_header(resp):
 
 # R-024: read configuration from environment variables so the app can be deployed
 # in different environments without code changes. Defaults match original behaviour.
-UPLOAD_FOLDER = os.environ.get('CRANE_UPLOAD_DIR', 'uploads')
-# R-019: SQLite replaces the flat metadata.json file. CRANE_DB lets tests and
+# DATA_DIR holds all state; the image sets it to /config. DB_PATH and UPLOADS_DIR
+# default to crane.db and uploads/ inside it (outside a container: the working dir).
+DATA_DIR = env('DATA_DIR', '.')
+UPLOAD_FOLDER = env('UPLOADS_DIR') or os.path.join(DATA_DIR, 'uploads')
+# R-019: SQLite replaces the flat metadata.json file. DB_PATH lets tests and
 # container deployments point at an isolated database path.
-DB_FILE = os.environ.get('CRANE_DB', 'crane.db')
+DB_FILE = env('DB_PATH') or os.path.join(DATA_DIR, 'crane.db')
 ALLOWED_EXTENSIONS = {'pdf'}
-MAX_CONTENT_LENGTH = int(os.environ.get('CRANE_MAX_UPLOAD_MB', '500')) * 1024 * 1024
-MAX_FIELD_LEN = int(os.environ.get('CRANE_MAX_FIELD_LEN', '64'))
+MAX_CONTENT_LENGTH = int(env('MAX_UPLOAD_MB', '500')) * 1024 * 1024
+MAX_FIELD_LEN = int(env('MAX_FIELD_LEN', '64'))
 
 # RR-010: automated backups. A backup is one .zip holding a *consistent* crane.db
 # snapshot (via SQLite's online-backup API) plus the uploads/ tree. Written on a
-# schedule to CRANE_BACKUP_DIR (default: a `backups/` dir beside the database) and
-# pruned to CRANE_BACKUP_KEEP. Point CRANE_BACKUP_DIR at a separate mount (e.g. a
-# TrueNAS share) for real off-host copies. Set CRANE_BACKUP_ENABLED=0 to disable the
+# schedule to BACKUP_DIR (default: a `backups/` dir beside the database) and
+# pruned to BACKUP_KEEP. Point BACKUP_DIR at a separate mount (e.g. a
+# TrueNAS share) for real off-host copies. Set BACKUP_ENABLED=0 to disable the
 # scheduler (the download endpoint still works).
-BACKUP_DIR = os.environ.get('CRANE_BACKUP_DIR') or os.path.join(
+BACKUP_DIR = env('BACKUP_DIR') or os.path.join(
     os.path.dirname(os.path.abspath(DB_FILE)), 'backups')
-BACKUP_INTERVAL_HOURS = float(os.environ.get('CRANE_BACKUP_INTERVAL_HOURS', '24'))
-BACKUP_KEEP = int(os.environ.get('CRANE_BACKUP_KEEP', '7'))
-BACKUP_ENABLED = os.environ.get('CRANE_BACKUP_ENABLED', '1') != '0'
+BACKUP_INTERVAL_HOURS = float(env('BACKUP_INTERVAL_HOURS', '24'))
+BACKUP_KEEP = int(env('BACKUP_KEEP', '7'))
+BACKUP_ENABLED = env('BACKUP_ENABLED', '1') != '0'
 # Set to 0 for DB-only backups — e.g. when uploads/ lives on storage that already
 # snapshots (a TrueNAS/ZFS share), so zipping the PDFs into every backup is redundant.
-BACKUP_INCLUDE_UPLOADS = os.environ.get('CRANE_BACKUP_INCLUDE_UPLOADS', '1') != '0'
+BACKUP_INCLUDE_UPLOADS = env('BACKUP_INCLUDE_UPLOADS', '1') != '0'
 BACKUP_PREFIX = 'crane-backup-'
 # Zip-bomb guard for restore: refuse an archive whose uncompressed contents exceed
 # this. Generous default (a large catalogue is legitimately big); env-overridable.
-MAX_RESTORE_UNCOMPRESSED = int(os.environ.get('CRANE_MAX_RESTORE_MB', '4096')) * 1024 * 1024
+MAX_RESTORE_UNCOMPRESSED = int(env('MAX_RESTORE_MB', '4096')) * 1024 * 1024
 
 # REM-OPS-03: backup-scheduler health. A silently-failing scheduler was previously
 # invisible (errors only hit stdout). We record the last run's outcome so /api/backup
@@ -175,8 +223,11 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # authenticated user behind the reverse-proxy gate); tune down via env if the app
 # is ever exposed more broadly. Read through app.config so the decorators (which
 # pass a callable) pick up test overrides.
-app.config['UPLOAD_RATE'] = os.environ.get('CRANE_UPLOAD_RATE', '60 per minute')
-app.config['WRITE_RATE'] = os.environ.get('CRANE_WRITE_RATE', '60 per minute')
+app.config['UPLOAD_RATE'] = env('UPLOAD_RATE', '60 per minute')
+app.config['WRITE_RATE'] = env('WRITE_RATE', '60 per minute')
+# All settings are read by now, so warn once for each old CRANE_ name still in use.
+for _legacy, _name in _LEGACY_ENV_USED:
+    app.logger.warning('setting %s is deprecated; use %s', _legacy, _name)
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 @app.errorhandler(RequestEntityTooLarge)
@@ -1363,7 +1414,8 @@ def instance_info():
         'version': APP_VERSION,
         'cranes': cranes,
         'files': files,
-        'trust_proxy': os.environ.get('CRANE_TRUST_PROXY', '0') == '1',
+        'trust_proxy': TRUST_PROXY_HOPS > 0,
+        'trust_proxy_hops': TRUST_PROXY_HOPS,
         'paths': {'database': DB_FILE, 'uploads': UPLOAD_FOLDER, 'backups': BACKUP_DIR},
         'limits': {
             'max_upload_mb': MAX_CONTENT_LENGTH // (1024 * 1024),
@@ -1396,11 +1448,11 @@ def version():
 init_db()
 _migrate_from_json()   # legacy metadata.json -> specs (inert once done)
 _migrate_from_specs()  # single-file specs -> multi-file cranes/files
-start_backup_scheduler()  # RR-010: periodic full backups (no-op if CRANE_BACKUP_ENABLED=0)
+start_backup_scheduler()  # RR-010: periodic full backups (no-op if BACKUP_ENABLED=0)
 
 if __name__ == '__main__':
     # REM-SEC-03: the Werkzeug debugger is an RCE vector if ever bound publicly, so it
-    # is opt-in (CRANE_DEBUG=1) rather than on by default. Production uses gunicorn and
-    # never touches this branch; `make dev` sets CRANE_DEBUG for local reloading.
-    debug = os.environ.get('CRANE_DEBUG', '0') == '1'
+    # is opt-in (DEBUG=1) rather than on by default. Production uses gunicorn and
+    # never touches this branch; `make dev` sets DEBUG for local reloading.
+    debug = env('DEBUG', '0') == '1'
     app.run(debug=debug, host='0.0.0.0', port=5000)

@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Don't spawn the periodic-backup thread during tests (tests call create_backup directly).
-os.environ.setdefault('CRANE_BACKUP_ENABLED', '0')
+os.environ.setdefault('BACKUP_ENABLED', '0')
 
 import app as app_module
 

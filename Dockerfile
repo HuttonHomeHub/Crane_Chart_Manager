@@ -20,14 +20,19 @@ RUN chmod +x docker-entrypoint.sh && chown -R crane:crane /app
 # R-028: stays root at container start — docker-entrypoint.sh remaps the 'crane'
 # user to PUID/PGID, fixes ownership of the mounted data dirs, then drops to that
 # user via setpriv before exec'ing the CMD below. See docker-entrypoint.sh.
-VOLUME ["/app/uploads"]
+# All state lives under /config (the shared container standard): the database,
+# uploads/ and backups/. Mount a host folder or named volume there.
+ENV DATA_DIR=/config
+RUN mkdir -p /config
+VOLUME ["/config"]
 
 EXPOSE 5000
 
 # Release version stamped in by the publish workflow (from the image tag). Surfaced
-# in the UI, at GET /version, and it seeds asset cache-busting when a file is unreadable.
-ARG CRANE_VERSION=dev
-ENV CRANE_VERSION=$CRANE_VERSION
+# in the UI, at GET /health and /version, and it seeds asset cache-busting when a file
+# is unreadable.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)"
