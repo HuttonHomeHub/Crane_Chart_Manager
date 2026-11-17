@@ -1,30 +1,12 @@
-__pycache__/
-.venv/
-.pytest_cache/
-
-# Runtime state — user's catalogue lives here; the app re-creates an empty
-# uploads/ directory on startup if missing. Commit individual files if you
-# want them tracked.
-uploads/
-metadata.json
-metadata.json.lock
-metadata.json.tmp
-metadata.json.migrated
-
-# R-019: SQLite metadata store (replaces metadata.json above) and its WAL sidecars.
-crane.db
-crane.db-wal
-crane.db-shm
-
-# Local backup zips written by the dev server (default BACKUP_DIR = <db dir>/backups).
-backups/
-
-# Coverage artifacts
-.coverage
-htmlcov/
-
-# TypeScript rebuild (phase 4)
+# Dependencies, build output and test reports.
 node_modules/
 /dist/
 coverage/
 /e2e-results/
+
+# Runtime state when run outside Docker (DATA_DIR unset): the catalogue lives here.
+uploads/
+backups/
+crane.db
+crane.db-wal
+crane.db-shm

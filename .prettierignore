@@ -1,13 +1,9 @@
 node_modules/
 dist/
 coverage/
-htmlcov/
 # Vendored hhh-platform release: never edited here (vendor:check enforces it).
 vendor/
 package-lock.json
-# The Python app's front end and pdf.js, until the rebuild replaces them (phase 4).
-static/
-templates/
 # The local dev stack (git-excluded).
 compose.yaml
 e2e-results/

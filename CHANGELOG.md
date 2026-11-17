@@ -13,6 +13,12 @@ that section as the GitHub Release notes.
 
 ### Changed
 
+- **Crane Charts 2.0 runs on the shared HuttonHomeHub platform.** The image is now Node 22
+  (TypeScript, Express on `@hhh/server`, React on `@hhh/ui`) instead of Python and Flask, with the
+  same look and way of working as PhotoMapper. The data, the `/config` layout, the settings
+  (old `CRANE_` names included) and the crane API carry over unchanged; see the README's
+  "Upgrading from 1.x". The Python app, its tests and tooling, and the unused Codespaces set-up
+  are removed; CI is one job running `scripts/check.sh`, as in PhotoMapper.
 - **Rebuild on hhh-platform begins (phase 4):** a TypeScript server on the shared kit is set up beside
   the Python app (which is still what ships), with Crane's settings and its database opened unchanged.
   CI checks both.

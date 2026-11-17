@@ -1,16 +1,11 @@
 #!/bin/sh
-# Every check CI's "checks" job runs, in the same order. CI calls this script, so
-# a local run proves what GitHub will see. Assumes requirements-dev.txt is installed.
-# E2E tests (tests/e2e/) are a separate CI job and need Playwright browsers.
-# On CT 106 run it in a throwaway container: see "Checks on CT 106" in CLAUDE.md.
+# Everything CI checks, run the same way here and in CI (.github/workflows/ci.yml):
+# `npm run check` in the Node 22 container, then the end-to-end tests against the built
+# Docker image (scripts/e2e.sh). Writes only gitignored paths (node_modules/, dist/,
+# coverage/, e2e-results/).
 set -eu
+cd "$(dirname "$0")/.."
 
-echo "== ruff"
-ruff check app.py static tests
-
-echo "== pip-audit"
-pip-audit -r requirements.txt --strict
-
-echo "== pytest (unit + integration, coverage gate 80%)"
-pytest tests/ --ignore=tests/e2e --cov=app --cov-report=term-missing \
-    --cov-fail-under=80 -q --tb=short "$@"
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/.npm \
+  -v "$PWD":/app -w /app node:22-bookworm sh -c 'npm ci && npm run check'
+sh scripts/e2e.sh

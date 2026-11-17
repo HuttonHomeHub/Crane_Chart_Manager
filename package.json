@@ -1,11 +1,12 @@
 {
   "name": "crane-charts",
   "private": true,
-  "description": "Crane Charts: the TypeScript rebuild on hhh-platform (phase 4). The release version stays in VERSION.",
+  "description": "Crane Charts: a catalogue of crane load-chart PDFs. The release version is in VERSION.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "server": "node server/index.ts",
+    "start": "node server/index.ts",
     "build": "vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
