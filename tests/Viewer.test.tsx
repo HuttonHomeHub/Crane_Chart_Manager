@@ -19,7 +19,7 @@ afterEach(() => {
 
 function setup(c: Crane, route: Route = () => ({ status: 404 })) {
   for (const f of c.files) fakePdfs.set(f.url, [['page']]);
-  const props = { onChanged: vi.fn(), onDeleted: vi.fn(), notify: vi.fn() };
+  const props = { onChanged: vi.fn(), onDeleted: vi.fn(), notify: vi.fn(), onAddFile: vi.fn() };
   const fetchMock = stubFetch(route);
   render(<Viewer crane={c} {...props} />);
   return { ...props, fetchMock };

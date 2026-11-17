@@ -32,6 +32,16 @@ that section as the GitHub Release notes.
   fullscreen, download, find in the document with highlights, the 1.x keyboard shortcuts, and
   `#crane/<id>` links (Back and Forward move between cranes). Zooming past the window's width
   now scrolls instead of shrinking the page back.
+- **Rebuild: uploading and editing.** The Upload button, the empty state's button, a PDF dropped
+  anywhere on the window (onto the open crane as an extra file, or as a new crane), the
+  sidebar's edit pencil and the strip's "Add file" open one dialog with 1.x's modes, its
+  details prefilled from the file name, with upload progress. Several PDFs open the bulk
+  importer, which groups them by make and model and imports them one at a time, waiting and
+  retrying when the server asks it to slow down.
+- **Fixed in the rebuild:** a bulk-import retry no longer creates a crane twice ("already
+  exists") when only one of its extra files had failed; it now sends just what is missing. And
+  "All four fields are required", "Choose a PDF first" and bulk-import problems now show in
+  their dialog, where 1.x's toasts were hidden behind it.
 
 ## v1.9.0 — shared container standard: unprefixed settings, all state in /config
 
