@@ -11,6 +11,18 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+### Changed
+
+- **Rebuild on hhh-platform begins (phase 4):** a TypeScript server on the shared kit is set up beside
+  the Python app (which is still what ships), with Crane's settings and its database opened unchanged.
+  CI checks both.
+- **Rebuild: the whole API in TypeScript.** Every crane route answers with the same JSON as 1.x
+  (uploads, extra files, primary file, labels, edits with folder rename, deletes, merge
+  manufacturers, facets, paging, export, the audit log), with the 1.x tests ported to Vitest.
+  Backups and `/api/info` use the shared kit and PhotoMapper's reply shapes; 1.x backups still
+  restore, and are renamed at startup so Settings lists them. Cranes whose names have accented
+  letters can now be edited and deleted. Still not what ships.
+
 ## v1.9.0 — shared container standard: unprefixed settings, all state in /config
 
 ### Added
@@ -21,9 +33,6 @@ that section as the GitHub Release notes.
 
 ### Changed
 
-- **Rebuild on hhh-platform begins (phase 4):** a TypeScript server on the shared kit is set up beside
-  the Python app (which is still what ships), with Crane's settings and its database opened unchanged.
-  CI checks both.
 - **Settings follow the shared container standard:** unprefixed names, the same in every app.
   `CRANE_DB` → `DB_PATH`, `CRANE_UPLOAD_DIR` → `UPLOADS_DIR`, `CRANE_TRUST_PROXY` →
   `TRUST_PROXY`, `CRANE_VERSION` → `APP_VERSION`, and every other `CRANE_X` → `X` (for example
