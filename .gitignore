@@ -25,5 +25,5 @@ htmlcov/
 
 # TypeScript rebuild (phase 4)
 node_modules/
-dist/
+/dist/
 coverage/
