@@ -6,11 +6,13 @@ import { CraneIcon } from './components/CraneIcon.tsx';
 import { EmptyState } from './components/EmptyState.tsx';
 import { InfoBar } from './components/InfoBar.tsx';
 import { SettingsDialog } from './components/SettingsDialog.tsx';
+import { Viewer } from './components/Viewer.tsx';
 import { Sidebar, makeForQuery } from './components/Sidebar.tsx';
 import { useCatalogue } from './hooks/useCatalogue.ts';
 import { useCraneActions } from './hooks/useCraneActions.ts';
 import { useMediaQuery } from './hooks/useMediaQuery.ts';
 import { useAppVersion } from './hooks/useSettings.ts';
+import { useHashCrane } from './hooks/useHashCrane.ts';
 import { groupCatalogue } from './lib/catalogue.ts';
 
 /** Below this width the sidebar is a drawer (1.x's --bp-tablet). */
@@ -30,13 +32,14 @@ export function neighbourOf(cranes: Crane[], gone: Crane): string | undefined {
 export function App() {
   const version = useAppVersion();
   const toast = useToast();
-  const { cranes, facets, loading, error, reload } = useCatalogue();
+  const { cranes, facets, loading, error, reload, patch } = useCatalogue();
   const { deleteCrane } = useCraneActions();
   const groups = useMemo(() => groupCatalogue(cranes), [cranes]);
 
   const [query, setQuery] = useState('');
   const [chosenMake, setChosenMake] = useState<string | undefined>();
-  const [currentId, setCurrentId] = useState<string | undefined>();
+  const [currentId, openCrane] = useHashCrane();
+  const [seenId, setSeenId] = useState<string | undefined>();
   const [focusId, setFocusId] = useState<string | undefined>();
   const [drawer, setDrawer] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -49,8 +52,13 @@ export function App() {
 
   // The make shown: the one chosen while it exists and matches the search, else the
   // best match (as 1.x's jump-to-make).
-  const make = makeForQuery(groups, query, chosenMake);
   const current = cranes.find((c) => c.id === currentId);
+  // A crane opened by a link, Back or Forward shows its own make in the sidebar.
+  if (current && current.id !== seenId) {
+    setSeenId(current.id);
+    setChosenMake(current.make);
+  }
+  const make = makeForQuery(groups, query, chosenMake);
 
   useEffect(() => {
     document.title = current ? `${current.make} ${current.model} · Crane Charts` : 'Crane Charts';
@@ -61,7 +69,7 @@ export function App() {
   }, [error, toast]);
 
   const open = (crane: Crane) => {
-    setCurrentId(crane.id);
+    openCrane(crane.id);
     setDrawer(false);
   };
 
@@ -72,7 +80,6 @@ export function App() {
     try {
       await deleteCrane(pendingDelete.id);
       setFocusId(neighbourOf(cranes, pendingDelete));
-      if (pendingDelete.id === currentId) setCurrentId(undefined);
       setPendingDelete(null);
       toast('Specification deleted', 'success');
       await reload();
@@ -125,7 +132,8 @@ export function App() {
           query={query}
           make={make}
           onSelectMake={setChosenMake}
-          currentId={currentId}
+          currentId={current?.id}
+          revealId={current?.id}
           focusId={focusId}
           onOpen={open}
           onDelete={(crane) => {
@@ -138,7 +146,26 @@ export function App() {
           <div className="sidebar-scrim" aria-hidden onClick={() => setDrawer(false)} />
         ) : null}
         <main className="viewer" inert={drawerOpen}>
-          {current ? <InfoBar crane={current} /> : <EmptyState hasCranes={cranes.length > 0} />}
+          {current ? (
+            <>
+              <InfoBar crane={current} />
+              <Viewer
+                key={current.id}
+                crane={current}
+                notify={toast}
+                onChanged={(updated) => {
+                  patch(updated);
+                  void reload();
+                }}
+                onDeleted={() => {
+                  setFocusId(neighbourOf(cranes, current));
+                  void reload();
+                }}
+              />
+            </>
+          ) : (
+            <EmptyState hasCranes={cranes.length > 0} />
+          )}
         </main>
       </div>
       <SettingsDialog

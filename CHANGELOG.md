@@ -27,6 +27,11 @@ that section as the GitHub Release notes.
   scrolls), deleting a crane, and Settings (instance info, backups and restore, merging
   manufacturers, export) on the shared design system. A restore, merge or failed action now
   reports inside its dialog instead of in a toast hidden behind it.
+- **Rebuild: the PDF viewer.** PDF.js 6 (loaded when the first chart opens), with the file
+  strip (switch, set as main, rename, delete), page and zoom controls, fit page or width,
+  fullscreen, download, find in the document with highlights, the 1.x keyboard shortcuts, and
+  `#crane/<id>` links (Back and Forward move between cranes). Zooming past the window's width
+  now scrolls instead of shrinking the page back.
 
 ## v1.9.0 — shared container standard: unprefixed settings, all state in /config
 

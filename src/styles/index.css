@@ -363,6 +363,268 @@ body {
   color: var(--fg-primary);
 }
 
+.viewer {
+  position: relative;
+}
+
+/* ---- File strip ---------------------------------------------------------- */
+
+.file-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-surface);
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 280px;
+  padding: 2px 2px 2px var(--space-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface-raised);
+}
+
+.file-chip.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.file-chip__open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.file-chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-chip__star {
+  color: var(--fg-tertiary);
+}
+
+.file-chip.is-primary .file-chip__star {
+  color: var(--accent);
+}
+
+.file-chip__action {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+.file-chip__action:hover {
+  background: var(--bg-surface);
+  color: var(--fg-primary);
+}
+
+.file-chip__action--delete:hover {
+  color: var(--danger-fg);
+}
+
+/* ---- PDF well, find bar and toolbar ------------------------------------- */
+
+.viewer__well {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6) var(--space-6) calc(var(--space-12) + 28px);
+  background: var(--bg-surface-sunken);
+  text-align: center;
+}
+
+.viewer__skeleton {
+  width: min(560px, 80%);
+  aspect-ratio: 1 / 1.414;
+  margin: 0 auto;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--bg-surface-raised) 0%,
+    var(--border-subtle) 50%,
+    var(--bg-surface-raised) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.viewer__error {
+  padding: var(--space-8);
+  color: var(--danger-fg);
+}
+
+.pdf-stage {
+  position: relative;
+  display: inline-block;
+  vertical-align: top;
+  line-height: 0;
+  box-shadow: var(--shadow-md);
+}
+
+.pdf-stage[hidden] {
+  display: none;
+}
+
+.pdf-highlights {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pdf-highlight {
+  position: absolute;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.pdf-highlight.is-current {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: 1.5px solid var(--accent);
+}
+
+.find-bar {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-4);
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-raised);
+  box-shadow: var(--shadow-lg);
+  color: var(--fg-tertiary);
+}
+
+.find-bar[hidden] {
+  display: none;
+}
+
+.find-bar input {
+  width: 180px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.find-bar__count {
+  min-width: 3.5em;
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+  text-align: right;
+}
+
+.toolbar {
+  position: absolute;
+  bottom: var(--space-5);
+  left: 50%;
+  z-index: var(--z-toolbar);
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - var(--space-8));
+  padding: var(--space-1);
+  transform: translateX(-50%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(12px);
+}
+
+.toolbar[hidden] {
+  display: none;
+}
+
+.tool {
+  display: inline-grid;
+  place-items: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.tool:hover:not(:disabled) {
+  background: var(--bg-surface-raised);
+  color: var(--fg-primary);
+}
+
+.tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tool.is-on {
+  color: var(--fg-primary);
+  background: var(--bg-surface-raised);
+}
+
+.toolbar__zoom {
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar__page {
+  width: 3.2em;
+  height: 28px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.toolbar__of,
+#page-total {
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+  padding: 0 2px;
+}
+
+.toolbar__divider {
+  width: 1px;
+  height: 20px;
+  margin: 0 var(--space-1);
+  background: var(--border-default);
+}
+
 /* ---- Settings: merge ----------------------------------------------------- */
 
 .merge {
@@ -407,6 +669,15 @@ body {
 }
 
 @media (max-width: 640px) {
+  .viewer__well {
+    padding: var(--space-3) var(--space-3) calc(var(--space-12) + 20px);
+  }
+
+  .tool {
+    min-width: 40px;
+    height: 40px;
+  }
+
   .sidebar {
     grid-template-columns: 120px 1fr;
   }
@@ -425,7 +696,37 @@ body {
   }
 }
 
+@media (max-width: 520px) {
+  .toolbar__fit,
+  .toolbar__fullscreen,
+  .toolbar__divider--fit {
+    display: none;
+  }
+}
+
+@media print {
+  .hhh-app-bar,
+  .sidebar,
+  .info-bar,
+  .file-strip,
+  .find-bar,
+  .toolbar {
+    display: none !important;
+  }
+
+  .viewer__well {
+    padding: 0;
+    overflow: visible;
+    background: none;
+  }
+
+  .pdf-stage {
+    box-shadow: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .viewer__skeleton,
   .sidebar__skeleton-row {
     animation: none;
   }
