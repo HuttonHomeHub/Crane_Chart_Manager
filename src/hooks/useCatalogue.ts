@@ -69,5 +69,9 @@ export function useCatalogue() {
   }, [load]);
 
   const reload = useCallback(() => load(true), [load]);
-  return { cranes, facets, loading, error, reload };
+  /** Puts the server's latest copy of one crane into the list straight away. */
+  const patch = useCallback((crane: Crane) => {
+    setCranes((list) => list.map((c) => (c.id === crane.id ? crane : c)));
+  }, []);
+  return { cranes, facets, loading, error, reload, patch };
 }
