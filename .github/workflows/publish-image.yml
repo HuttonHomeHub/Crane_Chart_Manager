@@ -29,8 +29,8 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # create the vX.Y.Z tag and GitHub Release
-      packages: write   # push to GHCR
+      contents: write # create the vX.Y.Z tag and GitHub Release
+      packages: write # push to GHCR
     steps:
       - uses: actions/checkout@v4
 

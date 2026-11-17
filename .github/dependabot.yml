@@ -5,15 +5,20 @@
 # target main); alerts stay on.
 version: 2
 updates:
-  - package-ecosystem: pip
+  - package-ecosystem: npm
     directory: /
     target-branch: dev
     schedule:
       interval: weekly
       day: monday
     groups:
-      python-minor-patch:
+      npm-minor-patch:
         update-types: [minor, patch]
+    # Node's type definitions follow the Node version the app runs on (22, see the
+    # docker entry below), so their major versions aren't proposed either.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /
@@ -25,9 +30,9 @@ updates:
       actions-minor-patch:
         update-types: [minor, patch]
 
-  # Python base image in the Dockerfile. A new Python version (e.g. 3.12 -> 3.14)
-  # is a deliberate choice that also touches ci.yml, so only patch-level digest
-  # and tag updates are proposed here.
+  # Node base image in the Dockerfile. Major Node versions (e.g. 22 -> 24) are a
+  # deliberate choice that also touches scripts/check.sh and @types/node, so they
+  # are not proposed here.
   - package-ecosystem: docker
     directory: /
     target-branch: dev
@@ -35,5 +40,5 @@ updates:
       interval: weekly
       day: monday
     ignore:
-      - dependency-name: python
-        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: node
+        update-types: [version-update:semver-major]

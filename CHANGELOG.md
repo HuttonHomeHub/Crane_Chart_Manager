@@ -11,14 +11,66 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+## v2.0.0 — rebuilt on the shared HuttonHomeHub platform (Node, TypeScript, React)
+
+### Changed
+
+- **Crane Charts 2.0 runs on the shared HuttonHomeHub platform.** The image is now Node 22
+  (TypeScript, Express on `@hhh/server`, React on `@hhh/ui`) instead of Python and Flask, with the
+  same look and way of working as PhotoMapper. The data, the `/config` layout, the settings
+  (old `CRANE_` names included) and the crane API carry over unchanged; see the README's
+  "Upgrading from 1.x". The Python app, its tests and tooling, and the unused Codespaces set-up
+  are removed; CI is one job running `scripts/check.sh`, as in PhotoMapper.
+- **Rebuild on hhh-platform begins (phase 4):** a TypeScript server on the shared kit is set up beside
+  the Python app (which is still what ships), with Crane's settings and its database opened unchanged.
+  CI checks both.
+- **Rebuild: the whole API in TypeScript.** Every crane route answers with the same JSON as 1.x
+  (uploads, extra files, primary file, labels, edits with folder rename, deletes, merge
+  manufacturers, facets, paging, export, the audit log), with the 1.x tests ported to Vitest.
+  Backups and `/api/info` use the shared kit and PhotoMapper's reply shapes; 1.x backups still
+  restore, and are renamed at startup so Settings lists them. Cranes whose names have accented
+  letters can now be edited and deleted. Still not what ships.
+- **Rebuild: the React front end begins.** The app bar, the sidebar (manufacturers, then types,
+  then models, in natural order, with search, collapsible types and rows added as the list
+  scrolls), deleting a crane, and Settings (instance info, backups and restore, merging
+  manufacturers, export) on the shared design system. A restore, merge or failed action now
+  reports inside its dialog instead of in a toast hidden behind it.
+- **Rebuild: the PDF viewer.** PDF.js 6 (loaded when the first chart opens), with the file
+  strip (switch, set as main, rename, delete), page and zoom controls, fit page or width,
+  fullscreen, download, find in the document with highlights, the 1.x keyboard shortcuts, and
+  `#crane/<id>` links (Back and Forward move between cranes). Zooming past the window's width
+  now scrolls instead of shrinking the page back.
+- **Rebuild: uploading and editing.** The Upload button, the empty state's button, a PDF dropped
+  anywhere on the window (onto the open crane as an extra file, or as a new crane), the
+  sidebar's edit pencil and the strip's "Add file" open one dialog with 1.x's modes, its
+  details prefilled from the file name, with upload progress. Several PDFs open the bulk
+  importer, which groups them by make and model and imports them one at a time, waiting and
+  retrying when the server asks it to slow down.
+- **Fixed in the rebuild:** a bulk-import retry no longer creates a crane twice ("already
+  exists") when only one of its extra files had failed; it now sends just what is missing. And
+  "All four fields are required", "Choose a PDF first" and bulk-import problems now show in
+  their dialog, where 1.x's toasts were hidden behind it.
+- **Rebuild: the command palette and shortcuts.** Ctrl/⌘+K (or the hint in the search box)
+  jumps to a crane by any word of its details or file labels, or lists everything at least a
+  capacity (`>=150`, `≥150`, `150t+`), smallest first. Ctrl/⌘+U uploads, and `?` or the
+  keyboard button lists every shortcut, now including find (Ctrl/⌘+F or `/`).
+- **Rebuild: end-to-end tests and screenshots.** 27 Playwright tests drive the built app and the
+  real PDF.js in a browser (1.x's scenarios, plus a check that a PDF renders with no console
+  errors or CSP problems), in CI and through `scripts/check-node.sh`. Screenshots of both themes
+  on desktop and phone are in `docs/screenshots/`. The first look in a browser found and fixed:
+  the find bar covering the details bar, the toolbar wrapping on phones and showing above the
+  open drawer, and the manufacturers heading overlapping its count.
+
 ## v1.9.0 — shared container standard: unprefixed settings, all state in /config
 
 ### Added
+
 - **`TRUST_PROXY` takes a hop count** (`0`, `1`, `2` …) instead of just on/off, and
   **`LOG_LEVEL`** (`fatal`, `error`, `warn`, `info`, `debug`) sets how much is logged. Both use
   the same names and values as PhotoMapper. `/api/info` adds `trust_proxy_hops`.
 
 ### Changed
+
 - **Settings follow the shared container standard:** unprefixed names, the same in every app.
   `CRANE_DB` → `DB_PATH`, `CRANE_UPLOAD_DIR` → `UPLOADS_DIR`, `CRANE_TRUST_PROXY` →
   `TRUST_PROXY`, `CRANE_VERSION` → `APP_VERSION`, and every other `CRANE_X` → `X` (for example
@@ -33,6 +85,7 @@ that section as the GitHub Release notes.
 ## v1.8.5 — gunicorn 27, dependency updates and Cloudflare docs
 
 ### Changed
+
 - **gunicorn 27** (from 23), with its control socket turned off (`--no-control-socket`): it's
   unused here and only logged a permission error at startup.
 - **Docs: real client IP behind Cloudflare.** nginx restores the visitor's IP from
@@ -45,6 +98,7 @@ that section as the GitHub Release notes.
 ## v1.8.4 — new release flow and pinned lint tooling
 
 ### Changed
+
 - **New release flow.** Work now lands on `dev` through pull requests, and a release is a merge
   of `dev` into `main`. That merge runs CI, then publishes the image as `X.Y.Z`, `X.Y`,
   `latest` and `sha-<short>` from the new `VERSION` file, and creates the `vX.Y.Z` tag and
@@ -60,11 +114,13 @@ that section as the GitHub Release notes.
   enforces. `scripts/check.sh` (also `make check`) runs the same checks as CI.
 
 ### Fixed
+
 - Lint is clean again under ruff 0.17.5: import order, one `startswith` tuple, a nested
   `with`, %-formatting and string concatenation in tests; the five deliberate catch-all
   `except Exception` blocks now say why. No change in behaviour.
 
 ## v1.8.3 — security and ops guardrails
+
 - **Flask 3.1.1 → 3.1.3** fixes CVE-2026-27205, found by the new dependency scanner.
 - **CI guardrails:** `pip-audit` dependency scan, ruff lint gate and an 80% coverage gate.
   Dependabot proposes pip, GitHub Actions and base-image updates. The base image is pinned by
@@ -76,18 +132,21 @@ that section as the GitHub Release notes.
 - No change to how the app behaves for users.
 
 ## v1.8.2 — palette close button + text weight
+
 - The **command palette** now has an **✕ close button** top-right, matching the Settings and
   Keyboard-shortcuts dialogs.
 - Its search text sits at the same size/weight as the other dialogs' inputs — the placeholder was
   falling back to the heavier browser-default colour; it now uses the app's tertiary tone.
 
 ## v1.8.1 — palette styling polish
+
 - The **command palette** (Ctrl/Cmd+K) now matches the upload/settings dialogs: same 14px corner
   radius, same header/footer padding rhythm, and a canvas-tinted hint bar. The search field no
   longer shows a stray focus-ring "box" (the global `:focus-visible` ring is suppressed there,
   as the palette itself is the focus context).
 
 ## v1.8.0 — backup restore
+
 - **Restore from a backup** — the Backups card in Settings now has a **Restore** button on each
   listed backup, and an **Upload & restore** control for an external zip (disaster recovery onto a
   fresh instance). Restore replaces the whole catalogue (database + PDFs) with the backup's
@@ -95,23 +154,26 @@ that section as the GitHub Release notes.
   by hand.
 - **Reversible** — every restore first takes a labelled `…-prerestore.zip` safety backup of the
   current state, so an accidental restore can be undone.
-- **Safe** — the archive and its database are validated *before* any live data is touched
+- **Safe** — the archive and its database are validated _before_ any live data is touched
   (path-traversal/zip-bomb guards, SQLite integrity check); the swap runs under the metadata lock,
   uploads first then the database last, atomically on the same filesystem.
 - New: `POST /api/backup/restore` (by-name or uploaded zip). `CRANE_MAX_RESTORE_MB` (default 4096)
   caps a restore archive's uncompressed size. (DL-030)
 
 ## v1.7.2 — natural sort order
+
 - Sidebar makes and models now sort **numeric-aware** like Windows Explorer, so `LTM1750`
   comes before `LTM11200` instead of `LTM11200` sorting first (pure alphabetical order
   compared the second digit `1` < `7`).
 
 ## v1.7.1 — sidebar make search fix
+
 - Searching a **manufacturer name** in the sidebar now jumps to that make and lists its
   models, instead of showing the make but hiding every model. (Model rows carry no make name,
   so a make-name query previously matched nothing in the model panel.)
 
 ## v1.7.0 — find & data hygiene
+
 - **Command palette** (`Ctrl/Cmd+K`, or click the search box's hint): jump to any crane by
   make, model, or type — fuzzy substring match — or filter by capacity with a range query
   (`>=150`, `>150`, `≥150`, or `150+`), which lists every crane at or above that tonnage
@@ -119,7 +181,7 @@ that section as the GitHub Release notes.
 - **Deep-link URLs**: opening a crane updates the address bar to `…/#crane/<id>`; sharing or
   bookmarking that link opens straight to the crane on load. Back/forward navigate between
   viewed cranes.
-- **Manufacturer autocomplete**: the make and type fields (upload modal *and* bulk-import grid)
+- **Manufacturer autocomplete**: the make and type fields (upload modal _and_ bulk-import grid)
   now suggest existing values from your catalogue, so spellings stay consistent.
 - **Merge manufacturers** tool in Settings: pick a mistyped make and the correct one, and every
   crane moves across — re-slugged where the target name is free, absorbed (files merged) where a
@@ -127,6 +189,7 @@ that section as the GitHub Release notes.
 - New: `GET /api/facets`, `POST /api/merge-make`. (DL-029)
 
 ## v1.6.0 — settings panel
+
 - The app-bar **gear** opens a **Settings** panel: a **Backups** card (status, schedule,
   "Back up now", "Download fresh", and a list of existing backups you can download
   individually) and a **This instance** card (version, catalogue counts, data/PDF/backup
@@ -137,6 +200,7 @@ that section as the GitHub Release notes.
   the Settings gear. (DL-028)
 
 ## v1.5.0 — automated backups
+
 - Closes the last real risk (RR-010): the app now writes periodic **full backups** — a
   consistent `crane.db` snapshot (SQLite online-backup API) plus a zip of `uploads/` — to
   `CRANE_BACKUP_DIR` (default `<data>/backups`) on a schedule (`CRANE_BACKUP_INTERVAL_HOURS`,
@@ -150,6 +214,7 @@ that section as the GitHub Release notes.
   them each run would be redundant. (DL-027)
 
 ## v1.4.3 — deterministic `:latest` (build fix)
+
 - No app changes. Fixed the publish pipeline: previously both the main-branch build (which
   labelled itself `latest`) and the tag build (`1.4.x`) pushed `:latest` and raced, so the
   version badge on `:latest` flip-flopped between the real version and the word "latest".
@@ -157,40 +222,46 @@ that section as the GitHub Release notes.
   release and carries its real version. (CI still runs on every main push.)
 
 ## v1.4.2 — capacity placement + tooltip removal
+
 - Capacity now sits **right after the model name** (`LTM1050-3.1 · 50t`, muted) instead of
   right-aligned by the edit buttons, which read as an awkward gap.
 - Removed the model-row hover tooltip — with the name and capacity both on the row it only
   repeated what was already visible.
 
 ## v1.4.1 — inline capacity in the model list
+
 - Capacity now sits on the same line as the model name (right-aligned) instead of stacked
   below it — halves the row height and lines capacities up in a scannable column. The
   file-count badge moves inline between the two.
 
 ## v1.4.0 — sidebar usability
+
 - **Wider Models column** (sidebar rebalanced to `148px 1fr`, 430px) so model names like
   `LTM1090-4.1` aren't truncated; tighter model rows so long catalogues scroll less.
 - **Collapsible type groups** — click a type header (now a button with a chevron + count) to
   fold that group away.
 - **Smarter search** — a manufacturer stays in the list when the query matches any of its
   cranes' model/capacity/type/label, not just the make name (so searching `500t` keeps the
-  makes that *have* a 500t crane); searching also expands any collapsed groups.
+  makes that _have_ a 500t crane); searching also expands any collapsed groups.
 - Fixed a pre-existing bug: model names were centre-aligned (the row body is a `<button>`).
   (DL-026)
 
 ## v1.3.2 — asset cache-busting + version indicator
+
 - `main.js`/`main.css` URLs now carry a content-hash `?v=` (`versioned_static()`), so a new
   deploy always serves fresh assets — **no more hard-refresh after updates** (from this
-  release on; the upgrade *to* 1.3.2 still needs one).
+  release on; the upgrade _to_ 1.3.2 still needs one).
 - Version badge in the app-bar; `GET /version` endpoint; `version` added to `/health`.
 - `CRANE_VERSION` flows from the image tag via a Docker build-arg. (DL-025)
 
 ## v1.3.1 — modal drop target + inline errors
+
 - The upload dialog's "Click to choose a PDF" box is now a real drop target.
 - Errors during a modal action (e.g. duplicate upload) show **inline in the dialog** instead
   of a toast that rendered behind the native `<dialog>` top-layer backdrop. (DL-024)
 
 ## v1.3.0 — bulk import
+
 - Drop many PDFs (or multi-select) → a grid groups them into cranes by the
   `Manufacturer Model (Label).pdf` convention. Fill Type + Capacity ("apply to all"), pick
   each multi-file crane's primary, import sequentially with per-row ✓/✗ and 429 retry.
@@ -200,6 +271,7 @@ that section as the GitHub Release notes.
 - Fixed: `Ctrl+F` (find) also toggled fullscreen. (DL-023)
 
 ## v1.2.0 — editable labels, drag-to-add, in-PDF find
+
 - Rename a file's label from its strip chip (`PATCH /api/cranes/<id>/files/<file_id>`).
 - Dropping a PDF while a crane is open offers to add it to that crane (with a "new crane
   instead" escape).
@@ -207,7 +279,8 @@ that section as the GitHub Release notes.
   navigates between them. (DL-022)
 
 ## v1.1.0 — multiple files per crane
-- Broke the original 1:1 "a crane *is* its PDF" model into `cranes` (1) → `files` (N). The
+
+- Broke the original 1:1 "a crane _is_ its PDF" model into `cranes` (1) → `files` (N). The
   crane slug stays the identity (`cranes.id` + the `uploads/<crane_id>/` directory);
   `cranes.primary_file` points at the default-open file.
 - Viewer "file strip": switch files, set the main one (★), delete, add. Sidebar file-count
@@ -216,12 +289,15 @@ that section as the GitHub Release notes.
   first boot. (DL-021)
 
 ## v1.0.1 — PUID/PGID entrypoint
+
 - `docker-entrypoint.sh` remaps the container user to `PUID`/`PGID` and self-heals bind-mount
   ownership, so no host-side `chown` is needed. Added `.dockerignore`. (R-028)
 
 ## v1.0.0 — engineering remediation programme
+
 Resolved every finding from the 2026-07-06 engineering deep-dive (see
 [docs/remediation/](docs/remediation/)). Headlines:
+
 - **Data & concurrency**: SQLite (`cranes`/`files`/`spec_events`) replacing the flat
   `metadata.json`; `threading.Lock`; audit trail; cursor pagination; export endpoint.
 - **Security**: CSRF double-submit cookie, strict CSP with per-request nonce, self-hosted
@@ -233,6 +309,6 @@ Resolved every finding from the 2026-07-06 engineering deep-dive (see
 
 ---
 
-*Deployment: `docker compose pull crane-charts && docker compose up -d crane-charts`. No
+_Deployment: `docker compose pull crane-charts && docker compose up -d crane-charts`. No
 database migration is needed for any release after v1.1.0. Always keep a copy of the mounted
-`/config` directory before a major upgrade (there is no automated backup yet — see RR-010).*
+`/config` directory before a major upgrade (there is no automated backup yet — see RR-010)._

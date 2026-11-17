@@ -1,0 +1,8 @@
+{
+  "extends": "./vendor/hhh-platform/packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["shared/**/*.ts", "server/**/*.ts", "tests/**/*.ts", "*.config.ts"],
+  "exclude": ["node_modules", "dist", "vendor"]
+}

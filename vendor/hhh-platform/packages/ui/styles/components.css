@@ -1,0 +1,512 @@
+/* Styles for the @hhh/ui components. Colours, type, spacing, radii, shadows, timing and
+ * control heights come from tokens; only measurements private to one component (a
+ * spinner's size, a 1px border) are written here.
+ * Import after tokens.css and base.css. Class names: hhh-block__element--modifier. */
+
+/* ---------- Buttons ---------- */
+.hhh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.hhh-button--md {
+  height: var(--control-h-md);
+  padding: 0 var(--space-4);
+  font-size: var(--text-base);
+}
+.hhh-button--sm {
+  height: var(--control-h-sm);
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+.hhh-button--primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.hhh-button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.hhh-button--primary:active:not(:disabled) {
+  background: var(--accent-active);
+}
+.hhh-button--secondary {
+  background: var(--bg-surface);
+  border-color: var(--border-default);
+  color: var(--fg-primary);
+}
+.hhh-button--secondary:hover:not(:disabled) {
+  background: var(--bg-surface-raised);
+  border-color: var(--border-strong);
+}
+.hhh-button--ghost {
+  background: transparent;
+  color: var(--fg-secondary);
+}
+.hhh-button--ghost:hover:not(:disabled) {
+  background: var(--bg-surface-raised);
+  color: var(--fg-primary);
+}
+.hhh-button--danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-fg);
+}
+.hhh-button--danger:hover:not(:disabled) {
+  border-color: var(--danger-fg);
+}
+.hhh-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hhh-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h-md);
+  height: var(--control-h-md);
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.hhh-icon-button:hover:not(:disabled) {
+  background: var(--bg-surface-raised);
+  color: var(--fg-primary);
+}
+.hhh-icon-button--secondary {
+  border-color: var(--border-default);
+  background: var(--bg-surface);
+}
+@media (pointer: coarse) {
+  .hhh-icon-button,
+  .hhh-button--md {
+    min-height: var(--touch-target);
+    min-width: var(--touch-target);
+  }
+}
+
+/* ---------- Badges, spinner ---------- */
+.hhh-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--fg-secondary);
+  background: var(--bg-surface-raised);
+}
+.hhh-badge--accent {
+  color: var(--accent);
+  background: var(--accent-muted-bg);
+  border-color: var(--accent-muted-border);
+}
+.hhh-badge--success {
+  color: var(--success-fg);
+  background: var(--success-bg);
+  border-color: var(--success-border);
+}
+.hhh-badge--warning {
+  color: var(--warning-fg);
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+}
+.hhh-badge--danger {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+.hhh-badge--info {
+  color: var(--info-fg);
+  background: var(--info-bg);
+  border-color: var(--info-border);
+}
+
+.hhh-spinner {
+  display: inline-block;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: hhh-spin 0.7s linear infinite;
+}
+.hhh-spinner--sm {
+  width: 14px;
+  height: 14px;
+}
+.hhh-spinner--md {
+  width: 20px;
+  height: 20px;
+}
+@keyframes hhh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Fields ---------- */
+.hhh-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.hhh-field__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--fg-primary);
+}
+.hhh-field__hint {
+  font-size: var(--text-xs);
+  color: var(--fg-tertiary);
+}
+.hhh-field__error {
+  font-size: var(--text-xs);
+  color: var(--danger-fg);
+}
+.hhh-input {
+  height: var(--control-h-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.hhh-input::placeholder {
+  color: var(--fg-tertiary);
+}
+.hhh-input:hover {
+  border-color: var(--border-strong);
+}
+.hhh-input:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus);
+  background: var(--bg-input-focus);
+}
+.hhh-input--textarea {
+  height: auto;
+  min-height: 88px;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+}
+.hhh-field--invalid .hhh-input {
+  border-color: var(--danger-fg);
+}
+.hhh-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+}
+.hhh-checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+/* ---------- App bar ---------- */
+.hhh-app-bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-app-bar);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--app-bar-h);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+.hhh-app-bar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.hhh-app-bar__icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+.hhh-app-bar__name {
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hhh-version {
+  flex: none;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface-raised);
+  color: var(--fg-secondary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.hhh-app-bar__search {
+  flex: 0 1 420px;
+  min-width: 0;
+}
+.hhh-app-bar__spacer {
+  flex: 1;
+}
+.hhh-app-bar__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+@media (max-width: 640px) {
+  .hhh-app-bar {
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+  }
+  .hhh-app-bar__search {
+    display: none;
+  }
+  /* The app's own buttons go icon-only; the label stays for screen readers. */
+  .hhh-app-bar__actions .hhh-button {
+    width: var(--control-h-md);
+    padding: 0;
+  }
+  .hhh-app-bar__actions .hhh-button__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+}
+
+/* ---------- Dialog ---------- */
+.hhh-dialog {
+  /* Centred whatever reset the app uses (a `* { margin: 0 }` reset would pin it top-left). */
+  margin: auto;
+  width: min(560px, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100vh - 2 * var(--space-8));
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+  color: var(--fg-primary);
+  box-shadow: var(--shadow-xl);
+}
+.hhh-dialog--sm {
+  width: min(420px, calc(100vw - 2 * var(--space-4)));
+}
+.hhh-dialog--lg {
+  width: min(760px, calc(100vw - 2 * var(--space-4)));
+}
+.hhh-dialog::backdrop {
+  background: var(--bg-overlay);
+}
+.hhh-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-2) var(--space-6);
+}
+.hhh-dialog__title {
+  font-size: var(--text-lg);
+}
+.hhh-dialog__body {
+  padding: var(--space-2) var(--space-6) var(--space-6);
+  overflow: auto;
+}
+.hhh-dialog__message {
+  color: var(--fg-secondary);
+}
+.hhh-dialog__error,
+.hhh-card__error {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-size: var(--text-sm);
+}
+.hhh-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ---------- Toasts ---------- */
+.hhh-toasts {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(420px, calc(100vw - 2 * var(--space-4)));
+}
+.hhh-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--info-fg);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface-raised);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-sm);
+}
+.hhh-toast--success {
+  border-left-color: var(--success-fg);
+}
+.hhh-toast--error {
+  border-left-color: var(--danger-fg);
+}
+.hhh-toast__message {
+  flex: 1;
+}
+
+/* ---------- Settings and cards ---------- */
+.hhh-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.hhh-card {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-canvas);
+}
+.hhh-card__title {
+  margin-bottom: var(--space-3);
+  font-size: var(--text-md);
+}
+.hhh-card__description {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+  color: var(--fg-secondary);
+  font-size: var(--text-sm);
+}
+.hhh-info-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+.hhh-info-list__row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+.hhh-info-list dt {
+  color: var(--fg-tertiary);
+}
+.hhh-info-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hhh-path {
+  color: var(--fg-secondary);
+}
+.hhh-backups__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.hhh-backups__schedule,
+.hhh-backups__detail {
+  color: var(--fg-tertiary);
+  font-size: var(--text-sm);
+}
+.hhh-backups__actions,
+.hhh-backups__upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.hhh-backups__list {
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.hhh-backups__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.hhh-backups__item + .hhh-backups__item {
+  border-top: 1px solid var(--border-subtle);
+}
+.hhh-backups__meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.hhh-backups__name {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hhh-backups__file input {
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+.hhh-backups__file input::file-selector-button {
+  height: var(--control-h-sm);
+  margin-right: var(--space-3);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--fg-primary);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.hhh-backups__file input::file-selector-button:hover {
+  background: var(--bg-surface-raised);
+}
+.hhh-empty {
+  margin: var(--space-4) 0;
+  color: var(--fg-tertiary);
+  font-size: var(--text-sm);
+}
+@media (max-width: 640px) {
+  .hhh-info-list__row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}

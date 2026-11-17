@@ -18,41 +18,44 @@ risks are appended after RR-011.
 
 ## Status legend
 
-| Code | Meaning |
-|------|---------|
-| OPEN | Active risk, no mitigation complete |
-| MITIGATED | Risk reduced by implemented controls |
-| CLOSED | Risk eliminated |
-| ACCEPTED | Documented acceptance with conditions |
+| Code      | Meaning                               |
+| --------- | ------------------------------------- |
+| OPEN      | Active risk, no mitigation complete   |
+| MITIGATED | Risk reduced by implemented controls  |
+| CLOSED    | Risk eliminated                       |
+| ACCEPTED  | Documented acceptance with conditions |
 
 ---
 
 ## RR-001 — Unauthenticated API (corresponds to R-002)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-001 |
-| **Status** | ACCEPTED |
-| **Severity** | HIGH |
+| Field          | Value                    |
+| -------------- | ------------------------ |
+| **ID**         | RR-001                   |
+| **Status**     | ACCEPTED                 |
+| **Severity**   | HIGH                     |
 | **Likelihood** | LOW (current deployment) |
-| **Impact** | CRITICAL if exploited |
+| **Impact**     | CRITICAL if exploited    |
 
 **Description:** All five API routes are open. Any client that can reach the app can list, upload, edit, or delete all crane specification documents.
 
 **Current controls (Codespaces deployment):**
+
 - GitHub Codespaces forwards port 5000 only to authenticated Codespaces sessions
 - Port visibility is `private` by default (not public)
 - CSRF prevents cross-site request forgery
 - `SameSite=Strict` on the CSRF cookie limits cross-site cookie abuse
 
 **Current controls (self-hosted Docker + nginx deployment — re-evaluated 2026-07-06, DL-020):**
+
 - Access is gated by **tinyauth** in front of nginx. The Nginx Proxy Manager proxy host for `cranecharts.huttonhomehub.co.uk` uses `auth_request /tinyauth;` on its `location /` block, so **every** path (including `/health`, `/api/*`, `/uploads/*`) requires a valid tinyauth session; unauthenticated requests are 302-redirected to the tinyauth login. **Verified 2026-07-06:** an incognito request to `/health` redirects to the tinyauth login page.
 - App runs with `CRANE_TRUST_PROXY=1`; the NPM `location /` block sets `Host`/`X-Forwarded-Proto`/`X-Forwarded-For` so `request.is_secure` and `get_remote_address()` reflect the real client (see RR-011). **Verified 2026-07-06:** the `crane_csrf` cookie is issued with `Secure` set over the public HTTPS URL, confirming `X-Forwarded-Proto` is landing.
 - CSRF + `SameSite=Strict` still apply underneath the tinyauth gate.
 
-**Residual risk:** The application itself still has zero credential checks of its own — it is entirely dependent on the tinyauth `auth_request` in NPM being present and correct. If that `location /` block is ever edited to drop `auth_request` (or a more-specific `location /api/` etc. is added without it), the full read/write/delete exposure returns. The control is now *verified in place* rather than *assumed*, but it lives in NPM config outside this repo, so it can't be regression-tested here.
+**Residual risk:** The application itself still has zero credential checks of its own — it is entirely dependent on the tinyauth `auth_request` in NPM being present and correct. If that `location /` block is ever edited to drop `auth_request` (or a more-specific `location /api/` etc. is added without it), the full read/write/delete exposure returns. The control is now _verified in place_ rather than _assumed_, but it lives in NPM config outside this repo, so it can't be regression-tested here.
 
 **Acceptance conditions:**
+
 - Codespaces deployment: port remains `private`.
 - Self-hosted deployment: the tinyauth `auth_request` gate must remain on the NPM `location /` block, and no more-specific `location` may bypass it. Re-verify with an incognito `/health` request after any NPM proxy-host change.
 - Re-evaluate on any further change to hosting model (e.g. if the tinyauth gate is removed, or the app is exposed with no proxy in front at all).
@@ -63,13 +66,13 @@ risks are appended after RR-011.
 
 ## RR-002 — CDN dependency for PDF.js (corresponds to R-004)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-002 |
-| **Status** | CLOSED |
-| **Severity** | HIGH |
-| **Likelihood** | LOW |
-| **Impact** | HIGH (supply-chain XSS) |
+| Field          | Value                   |
+| -------------- | ----------------------- |
+| **ID**         | RR-002                  |
+| **Status**     | CLOSED                  |
+| **Severity**   | HIGH                    |
+| **Likelihood** | LOW                     |
+| **Impact**     | HIGH (supply-chain XSS) |
 
 **Description:** PDF.js was loaded from `cdnjs.cloudflare.com` without SRI. A CDN compromise or man-in-the-middle attack on the CDN connection could inject arbitrary JavaScript.
 
@@ -79,13 +82,13 @@ risks are appended after RR-011.
 
 ## RR-003 — Concurrent delete/upload data loss (corresponds to R-001)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-003 |
-| **Status** | CLOSED |
-| **Severity** | CRITICAL |
-| **Likelihood** | MEDIUM (any concurrent usage) |
-| **Impact** | CRITICAL (silent metadata loss) |
+| Field          | Value                           |
+| -------------- | ------------------------------- |
+| **ID**         | RR-003                          |
+| **Status**     | CLOSED                          |
+| **Severity**   | CRITICAL                        |
+| **Likelihood** | MEDIUM (any concurrent usage)   |
+| **Impact**     | CRITICAL (silent metadata loss) |
 
 **Description:** `delete_file()` performed read-modify-write on `metadata.json` without `metadata_lock()`. A concurrent upload could lose its metadata entry.
 
@@ -95,13 +98,13 @@ risks are appended after RR-011.
 
 ## RR-004 — Flask/Werkzeug incompatibility in production (corresponds to R-005)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-004 |
-| **Status** | CLOSED |
-| **Severity** | MEDIUM |
+| Field          | Value  |
+| -------------- | ------ |
+| **ID**         | RR-004 |
+| **Status**     | CLOSED |
+| **Severity**   | MEDIUM |
 | **Likelihood** | MEDIUM |
-| **Impact** | MEDIUM |
+| **Impact**     | MEDIUM |
 
 **Description:** Flask 2.3.2 and Werkzeug 3.x had a known API incompatibility (`werkzeug.__version__` removed). Unknown further incompatibilities possible.
 
@@ -111,13 +114,13 @@ risks are appended after RR-011.
 
 ## RR-005 — Development server in active use (corresponds to R-006)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-005 |
-| **Status** | MITIGATED |
-| **Severity** | MEDIUM |
-| **Likelihood** | LOW |
-| **Impact** | MEDIUM |
+| Field          | Value     |
+| -------------- | --------- |
+| **ID**         | RR-005    |
+| **Status**     | MITIGATED |
+| **Severity**   | MEDIUM    |
+| **Likelihood** | LOW       |
+| **Impact**     | MEDIUM    |
 
 **Description:** `flask --debug run` was the configured server. Debug mode exposes an interactive Werkzeug debugger at `/__debugger__` if an unhandled exception occurs.
 
@@ -127,13 +130,13 @@ risks are appended after RR-011.
 
 ## RR-006 — No rollback mechanism for failed deployments (new risk)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-006 |
-| **Status** | MITIGATED |
-| **Severity** | LOW |
-| **Likelihood** | LOW |
-| **Impact** | MEDIUM |
+| Field          | Value     |
+| -------------- | --------- |
+| **ID**         | RR-006    |
+| **Status**     | MITIGATED |
+| **Severity**   | LOW       |
+| **Likelihood** | LOW       |
+| **Impact**     | MEDIUM    |
 
 **Description:** There is no versioned deployment. If a bad change is pushed to the Codespaces branch and auto-reloaded, the only recovery is `git revert`. For a single-user internal tool this is acceptable.
 
@@ -143,13 +146,13 @@ risks are appended after RR-011.
 
 ## RR-007 — Non-PDF files served as PDF (corresponds to R-003)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-007 |
-| **Status** | CLOSED |
-| **Severity** | MEDIUM |
-| **Likelihood** | LOW |
-| **Impact** | MEDIUM |
+| Field          | Value  |
+| -------------- | ------ |
+| **ID**         | RR-007 |
+| **Status**     | CLOSED |
+| **Severity**   | MEDIUM |
+| **Likelihood** | LOW    |
+| **Impact**     | MEDIUM |
 
 **Description:** Only file extension was checked. Files with `.pdf` extension but non-PDF content could be uploaded.
 
@@ -159,13 +162,13 @@ risks are appended after RR-011.
 
 ## RR-008 — 500 responses leak internal file paths (corresponds to R-010)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-008 |
-| **Status** | CLOSED |
-| **Severity** | MEDIUM |
-| **Likelihood** | LOW |
-| **Impact** | LOW |
+| Field          | Value  |
+| -------------- | ------ |
+| **ID**         | RR-008 |
+| **Status**     | CLOSED |
+| **Severity**   | MEDIUM |
+| **Likelihood** | LOW    |
+| **Impact**     | LOW    |
 
 **Description:** `return jsonify({'error': str(e)})` could expose OS error messages containing `/workspaces/codespaces-flask/uploads/…` paths.
 
@@ -177,17 +180,18 @@ risks are appended after RR-011.
 
 ### RR-009 — Flask 3.x upgrade may expose hidden API differences
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-009 |
-| **Status** | MITIGATED |
-| **Severity** | MEDIUM |
-| **Likelihood** | LOW |
-| **Impact** | MEDIUM |
+| Field          | Value     |
+| -------------- | --------- |
+| **ID**         | RR-009    |
+| **Status**     | MITIGATED |
+| **Severity**   | MEDIUM    |
+| **Likelihood** | LOW       |
+| **Impact**     | MEDIUM    |
 
 **Description:** Flask 3.x introduced some breaking changes (e.g., `flask.escape` removed, `flask.json` module restructured). The application may use deprecated API patterns not covered by the test suite.
 
 **Current controls:**
+
 - All 23 + new tests pass after upgrade
 - Application routes reviewed manually against Flask 3.x changelog
 - R-008 CI will catch regressions on future changes
@@ -198,13 +202,13 @@ risks are appended after RR-011.
 
 ### RR-010 — SQLite database file corruption or loss
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-010 |
-| **Status** | MITIGATED (v1.5.0) |
-| **Severity** | HIGH |
-| **Likelihood** | LOW |
-| **Impact** | HIGH |
+| Field          | Value              |
+| -------------- | ------------------ |
+| **ID**         | RR-010             |
+| **Status**     | MITIGATED (v1.5.0) |
+| **Severity**   | HIGH               |
+| **Likelihood** | LOW                |
+| **Impact**     | HIGH               |
 
 **Description:** The SQLite database (`crane.db`) stores all metadata. A corrupted or accidentally deleted file would lose all metadata permanently.
 
@@ -222,13 +226,13 @@ R-017 (virtual scrolling) closed — frontend-only change (batched DOM rendering
 
 ## RR-011 — Reverse-proxy headers spoofable / rate-limiter split-brain (corresponds to R-027)
 
-| Field | Value |
-|-------|-------|
-| **ID** | RR-011 |
-| **Status** | MITIGATED |
-| **Severity** | MEDIUM |
+| Field          | Value                                                    |
+| -------------- | -------------------------------------------------------- |
+| **ID**         | RR-011                                                   |
+| **Status**     | MITIGATED                                                |
+| **Severity**   | MEDIUM                                                   |
 | **Likelihood** | HIGH (certain, if deployed behind nginx without the fix) |
-| **Impact** | MEDIUM |
+| **Impact**     | MEDIUM                                                   |
 
 **Description:** Raised when moving the app off Codespaces onto self-hosted Docker behind the user's own nginx. Two related issues: (1) without trusting `X-Forwarded-Proto`/`X-Forwarded-For`, the app can't tell TLS was terminated at nginx, so the CSRF cookie never gets `Secure`, and `Flask-Limiter`'s `get_remote_address()` keys every request off nginx's own IP instead of the real client; (2) `Flask-Limiter`'s `storage_uri="memory://"` keeps counters per-process — the Dockerfile's original 2-worker Gunicorn config would silently double every configured rate limit.
 
@@ -244,10 +248,10 @@ R-017 (virtual scrolling) closed — frontend-only change (batched DOM rendering
 
 ## RR-012 — Vulnerable dependency shipping in the image (Flask CVE-2026-27205)
 
-| | |
-|---|---|
-| **ID** | RR-012 |
-| **Status** | CLOSED |
+|            |                                                          |
+| ---------- | -------------------------------------------------------- |
+| **ID**     | RR-012                                                   |
+| **Status** | CLOSED                                                   |
 | **Source** | Audit finding S2 → new `pip-audit` CI gate (REM-SEC-02a) |
 
 **Risk:** The published image bundled **Flask 3.1.1**, affected by **CVE-2026-27205** (fixed in
@@ -265,10 +269,10 @@ gate reduces window, doesn't eliminate it.
 
 ## RR-013 — Single-process architectural ceiling
 
-| | |
-|---|---|
-| **ID** | RR-013 |
-| **Status** | ACCEPTED |
+|            |                                       |
+| ---------- | ------------------------------------- |
+| **ID**     | RR-013                                |
+| **Status** | ACCEPTED                              |
 | **Source** | Audit findings B2 / S5 (REM-SCALE-02) |
 
 **Risk:** Consistency depends on an in-process `threading.Lock` and a `memory://` rate-limiter,
@@ -279,7 +283,7 @@ corrupt the disk/DB invariant and multiply rate limits. The app cannot scale hor
 Dockerfile pins `--workers 1` to enforce it.
 
 **Re-evaluation trigger:** Any need for multiple workers/replicas or HA — at which point the lock
-must move to a shared advisory lock and the limiter to Redis (do those *first*).
+must move to a shared advisory lock and the limiter to Redis (do those _first_).
 
 ---
 

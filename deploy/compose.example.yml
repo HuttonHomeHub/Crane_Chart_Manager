@@ -9,7 +9,7 @@
 services:
   crane-charts:
     container_name: crane-charts
-    image: ghcr.io/huttonhomehub/crane-charts:latest   # or pin a version, e.g. :1.9.0
+    image: ghcr.io/huttonhomehub/crane-charts:latest # or pin a version, e.g. :1.9.0
     ports:
       - 5000:5000
     environment:

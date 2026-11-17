@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+# Vendored hhh-platform release: never edited here (vendor:check enforces it).
+vendor/
+package-lock.json
+# The local dev stack (git-excluded).
+compose.yaml
+e2e-results/

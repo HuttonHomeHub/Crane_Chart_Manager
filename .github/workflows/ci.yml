@@ -13,50 +13,14 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: lint, audit, unit tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: "pip"
-      - name: Install dev tooling
-        run: pip install -r requirements-dev.txt
-      # Same script as a local run (ruff, pip-audit, pytest with the 80% coverage gate).
-      - name: Run checks
-        run: sh scripts/check.sh
-
-  e2e:
-    name: Playwright E2E
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: "pip"
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-      - name: Install Playwright browsers
-        run: python -m playwright install --with-deps chromium
-      - name: Run E2E tests
-        run: pytest tests/e2e/ -v --tb=short
-
-  # The one check the rulesets require. It runs even when a job above fails and
-  # passes only if all of them passed, because GitHub can treat a *skipped*
-  # required check as passing.
+  # The one check the rulesets require.
   build:
-    name: build
-    needs: [checks, e2e]
-    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: All checks passed
-        env:
-          CHECKS: ${{ needs.checks.result }}
-          E2E: ${{ needs.e2e.result }}
-        run: |
-          echo "checks=$CHECKS e2e=$E2E"
-          [ "$CHECKS" = success ] && [ "$E2E" = success ]
+      - uses: actions/checkout@v4
+
+      # Exactly what scripts/check.sh runs on the dev box: `npm run check` in the Node 22
+      # container (vendored-platform check, typecheck, lint, format, tests with coverage,
+      # build, audit), then the end-to-end tests against the built Docker image.
+      - name: Run checks and end-to-end tests
+        run: sh scripts/check.sh
