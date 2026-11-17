@@ -11,6 +11,8 @@ that section as the GitHub Release notes.
 
 ## Unreleased
 
+## v2.0.0 — rebuilt on the shared HuttonHomeHub platform (Node, TypeScript, React)
+
 ### Changed
 
 - **Crane Charts 2.0 runs on the shared HuttonHomeHub platform.** The image is now Node 22
