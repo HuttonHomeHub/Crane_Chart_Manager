@@ -36,7 +36,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@eslint/js": "9.39.5",
+    "@eslint/js": "10.0.1",
     "@hhh/config": "file:vendor/hhh-platform/packages/config",
     "@hhh/ui": "file:vendor/hhh-platform/packages/ui",
     "@playwright/test": "1.65.1",
