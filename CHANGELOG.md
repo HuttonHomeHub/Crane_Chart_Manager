@@ -22,6 +22,11 @@ that section as the GitHub Release notes.
   Backups and `/api/info` use the shared kit and PhotoMapper's reply shapes; 1.x backups still
   restore, and are renamed at startup so Settings lists them. Cranes whose names have accented
   letters can now be edited and deleted. Still not what ships.
+- **Rebuild: the React front end begins.** The app bar, the sidebar (manufacturers, then types,
+  then models, in natural order, with search, collapsible types and rows added as the list
+  scrolls), deleting a crane, and Settings (instance info, backups and restore, merging
+  manufacturers, export) on the shared design system. A restore, merge or failed action now
+  reports inside its dialog instead of in a toast hidden behind it.
 
 ## v1.9.0 — shared container standard: unprefixed settings, all state in /config
 
