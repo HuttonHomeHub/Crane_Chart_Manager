@@ -1,50 +1,59 @@
-# SEC-DEP-03: base image pinned by digest for reproducible, drift-free builds.
-# Digest is python:3.12-slim (captured 2026-07-08); refresh with:
-#   docker pull python:3.12-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.12-slim
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+# Crane Charts' production image. Multi-stage: the build stage compiles the front end
+# and the native SQLite module; the runtime stage carries only the pruned production
+# node_modules, the built dist/, the server and the vendored platform.
 
-RUN useradd --create-home --shell /bin/bash crane
-
+# ---- Build stage ----
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Toolchain for better-sqlite3 when no prebuilt binary matches.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+# The shared platform is vendored; npm resolves its file: dependencies from here.
+COPY vendor ./vendor
+RUN npm ci
 
 COPY . .
+RUN npm run build \
+  && npm prune --omit=dev
 
-# Build-time ownership so the no-volume-mounted default (bare 'uploads'/'crane.db'
-# under /app) is already correct — the entrypoint's runtime chown then only ever
-# has to touch an actual bind-mounted path, never the whole app tree.
-RUN chmod +x docker-entrypoint.sh && chown -R crane:crane /app
+# ---- Runtime stage ----
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app
 
-# R-028: stays root at container start — docker-entrypoint.sh remaps the 'crane'
-# user to PUID/PGID, fixes ownership of the mounted data dirs, then drops to that
-# user via setpriv before exec'ing the CMD below. See docker-entrypoint.sh.
-# All state lives under /config (the shared container standard): the database,
-# uploads/ and backups/. Mount a host folder or named volume there.
-ENV DATA_DIR=/config
+# All state lives under /config (the shared container standard): crane.db, uploads/
+# and backups/. The entrypoint fixes their ownership at startup.
+ENV NODE_ENV=production \
+    PORT=5000 \
+    DATA_DIR=/config
 RUN mkdir -p /config
-VOLUME ["/config"]
 
-EXPOSE 5000
-
-# Release version stamped in by the publish workflow (from the image tag). Surfaced
-# in the UI, at GET /health and /version, and it seeds asset cache-busting when a file
-# is unreadable.
+# Release version stamped in by the publish workflow (from VERSION). Reported at
+# GET /health and /version, and shown in the app bar.
 ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
 
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/server ./server
+COPY --from=build /app/shared ./shared
+# @hhh/server is a runtime dependency, installed as a link into the vendored platform.
+COPY --from=build /app/vendor ./vendor
+COPY --from=build /app/package.json ./package.json
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 5000
+VOLUME ["/config"]
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||5000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["./docker-entrypoint.sh"]
-
-# R-027: single worker — Flask-Limiter's storage_uri="memory://" keeps rate-limit
-# counters in process memory. Multiple workers would each hold independent counters,
-# silently multiplying the configured limits (e.g. 10/min becomes ~10/min per worker).
-# A single-user internal tool doesn't need the concurrency a second worker buys;
-# if that changes, switch storage_uri to a shared backend (e.g. Redis) first.
-# --no-control-socket: gunicorn 25.1+ opens a control socket (for `gunicornc`) under
-# $HOME, which is /root here after setpriv drops to the crane user, so it only logs a
-# permission error. Nothing uses gunicornc, so it stays off.
-CMD ["gunicorn", "--workers", "1", "--bind", "0.0.0.0:5000", "--no-control-socket", "app:app"]
+# The entrypoint runs as root, fixes ownership of the data folders, then drops to
+# PUID:PGID with setpriv and execs the server, which stays PID 1 so SIGTERM reaches it
+# for a graceful shutdown (server/index.ts).
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["node", "server/index.ts"]

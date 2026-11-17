@@ -13,70 +13,14 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: lint, audit, unit tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-      - name: Install dev tooling
-        run: pip install -r requirements-dev.txt
-      # Same script as a local run (ruff, pip-audit, pytest with the 80% coverage gate).
-      - name: Run checks
-        run: sh scripts/check.sh
-
-  e2e:
-    name: Playwright E2E
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-      - name: Install Playwright browsers
-        run: python -m playwright install --with-deps chromium
-      - name: Run E2E tests
-        run: pytest tests/e2e/ -v --tb=short
-
-  # The TypeScript rebuild on hhh-platform (phase 4), until it replaces the Python app:
-  # vendored-platform check, typecheck, lint, Prettier, Vitest with coverage, npm audit.
-  node:
-    name: TypeScript rebuild checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install dependencies
-        run: npm ci
-      - name: Run checks
-        run: npm run check
-      # The built app in a throwaway container, driven by the pinned Playwright image.
-      - name: End-to-end tests
-        run: sh scripts/e2e.sh
-
-  # The one check the rulesets require. It runs even when a job above fails and
-  # passes only if all of them passed, because GitHub can treat a *skipped*
-  # required check as passing.
+  # The one check the rulesets require.
   build:
-    name: build
-    needs: [checks, e2e, node]
-    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: All checks passed
-        env:
-          CHECKS: ${{ needs.checks.result }}
-          E2E: ${{ needs.e2e.result }}
-          NODE: ${{ needs.node.result }}
-        run: |
-          echo "checks=$CHECKS e2e=$E2E node=$NODE"
-          [ "$CHECKS" = success ] && [ "$E2E" = success ] && [ "$NODE" = success ]
+      - uses: actions/checkout@v4
+
+      # Exactly what scripts/check.sh runs on the dev box: `npm run check` in the Node 22
+      # container (vendored-platform check, typecheck, lint, format, tests with coverage,
+      # build, audit), then the end-to-end tests against the built Docker image.
+      - name: Run checks and end-to-end tests
+        run: sh scripts/check.sh

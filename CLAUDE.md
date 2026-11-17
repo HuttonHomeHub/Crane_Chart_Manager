@@ -1,121 +1,82 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. The rules in `~/projects/CLAUDE.md` apply here too. If the two ever disagree, the stricter one wins. This file holds only Crane Charts' own facts.
+Guidance for AI assistants working in this repository. The rules in `~/projects/CLAUDE.md` apply here too. If the two ever disagree, the stricter one wins. This file holds only Crane Charts' own facts.
 
-## Commands
+## Project
 
-```bash
-sh scripts/check.sh            # every CI check except E2E: ruff, pip-audit, pytest + 80% coverage gate (also `make check`)
-pytest tests/ --ignore=tests/e2e   # unit + integration (88 tests). Plain `pytest tests/` also collects E2E
-pytest tests/e2e/              # Playwright E2E suite (24 tests; requires Chromium)
-pytest tests/test_app.py::TestClassName::test_name -v   # single test
-flask --debug run              # dev server on :5000 with auto-reload
-```
-
-Deps: runtime in `requirements.txt` (what the image installs); dev tooling pinned exactly in `requirements-dev.txt`. The ruff rule list is locked in `ruff.toml`. To widen it, add codes there in their own change.
+**Crane Charts**: a catalogue of crane load-chart PDFs. A crane (make, type, model, capacity) owns one or more PDFs; the sidebar groups cranes Manufacturer → Type → Model; the viewer renders PDFs with PDF.js and searches inside them. Node 22 and TypeScript: Express 5 on `@hhh/server`, React on `@hhh/ui`, the same platform as PhotoMapper. It was a Flask app until 2.0 (history in `CHANGELOG.md` and `docs/remediation/`).
 
 ## CT 106 (dev box)
 
-- **Checks:** there is no pip or venv on CT 106, so run the checks in a throwaway container. The repo is mounted read-only and copied inside, because `app.py` creates `uploads/` on import:
-  ```bash
-  docker run --rm -v "$PWD":/src:ro -v ct106-pip-cache:/root/.cache/pip \
-    -e PYTHONDONTWRITEBYTECODE=1 -e PIP_ROOT_USER_ACTION=ignore python:3.12-slim \
-    sh -c 'cp -r /src /work && cd /work && pip install -q -r requirements-dev.txt && sh scripts/check.sh'
-  ```
-- **E2E:** ask the user first. Run them in Microsoft's Playwright Python image at a pinned tag, never by installing browsers on the box.
-- **Test stack:** a git-excluded `compose.yaml` (in `.git/info/exclude`) builds from the Dockerfile, keeps `/config` in the `crane-config` volume, sets `TRUST_PROXY=0` (no proxy in front) and publishes port 5000. Start it with `docker compose up -d --build`. Test data only.
-- `.devcontainer/` is a leftover from Codespaces and is not used on CT 106.
+- **Checks:** `sh scripts/check.sh`, from the repo root, runs exactly what CI runs (`ci.yml`'s one job calls the same script): `npm ci && npm run check` in the `node:22-bookworm` container (vendored-platform check, typecheck of the server, browser and e2e code, lint, Prettier, Vitest with coverage, the Vite build, `npm audit`), then `scripts/e2e.sh`. It writes only the gitignored `node_modules/`, `dist/`, `coverage/` and `e2e-results/`.
+- **End-to-end tests:** `sh scripts/e2e.sh [filter]` builds the image, runs it on a throwaway Docker network as host `crane` with an in-memory `/config` (test data only) and roomy rate limits, and runs `e2e/` from the pinned Playwright image. The user has agreed to these running on CT 106. The tests share one server, so each makes cranes with names of its own (`uniq()` in `e2e/fixtures.ts`, which also writes real PDFs with text). The app is plain HTTP there: Chrome's notice that it ignored `Cross-Origin-Opener-Policy` is expected and allowed, nothing else. Browser-only APIs that need HTTPS (`crypto.randomUUID`, clipboard reads) must not be relied on.
+- **Screenshots:** `SCREENSHOTS=1 sh scripts/e2e.sh screenshots` writes `docs/screenshots/` (both themes, desktop and phone). After a visual change, retake them and look at every one before committing.
+- **Test stack:** the git-excluded `compose.yaml` (in `.git/info/exclude`) builds from the Dockerfile, keeps `/config` in the `crane-config` volume, sets `TRUST_PROXY=0` and publishes port 5000. `docker compose up -d --build`. Test data only.
+- **Dev server:** `npm run server` (API on :5000) and `npm run dev` (Vite, proxying `/api`, `/uploads` and `/version`), in the Node image.
+
+## Shared platform
+
+- `vendor/hhh-platform/` is a vendored hhh-platform release (version in its `VERSION`). Never edit it: `npm run vendor:check` fails CI if it differs from the release. Upgrade with `node vendor/hhh-platform/scripts/vendor.ts X.Y.Z` in its own PR. The Dockerfile copies `vendor/` before `npm ci`, and into the runtime image (`@hhh/server` runs from it). `.gitignore` must say `/dist/`, not `dist/`, or the vendored `packages/server/dist` is dropped.
+- TypeScript, ESLint, Prettier and Vitest come from `@hhh/config`. Three TypeScript projects: `tsconfig.json` (server, `shared/`, Node tests), `tsconfig.app.json` (browser, JSX, `tests/*.tsx`), `tsconfig.e2e.json` (Playwright tests, with the DOM for code run in the page). Imports name the `.ts`/`.tsx` file. The API's shapes live once in `shared/api.ts`; never redeclare them.
+- Coverage gate: the standard's 80% of lines (measured: 96%). New code comes with tests.
+
+## Settings
+
+- Read once in `server/config.ts` with the kit's `loadSettings`: the shared names (`LOG_LEVEL`, `TRUST_PROXY`, `DATA_DIR`, `DB_PATH`, `UPLOADS_DIR`, `APP_VERSION`) plus Crane's own (`PORT`, `MAX_UPLOAD_MB`, `MAX_FIELD_LEN`, `UPLOAD_RATE`, `WRITE_RATE`, `BACKUP_*`, `MAX_RESTORE_MB`). Old `CRANE_` names still work (`CRANE_DB`, `CRANE_UPLOAD_DIR`, `CRANE_VERSION`, otherwise `CRANE_` + name) and are logged as deprecated by `server/index.ts`. A bad value stops startup. The full table is in the README.
+- `server/paths.ts` resolves `DATA_DIR`, `DB_PATH` (`crane.db`), `UPLOADS_DIR` and `BACKUP_DIR` (`backups/` beside the database). `docker-entrypoint.sh` resolves the same paths, old names included.
+- `TRUST_PROXY` is a hop count; live is `1` (nginx restores the visitor's IP from `CF-Connecting-IP`). Never set it higher than the real number of proxies.
+- `deploy/compose.example.yml` is the live layout.
 
 ## Release
 
-- Version: the `VERSION` file (`X.Y.Z`). `CHANGELOG.md` has an `## Unreleased` section with `### Added` / `### Changed` / `### Fixed`; every PR into `dev` adds its line there.
-- A release is merging `dev` into `main`. `.github/workflows/publish-image.yml` then runs CI, fails if `vX.Y.Z` already exists, publishes `ghcr.io/huttonhomehub/crane-charts` as `X.Y.Z`, `X.Y`, `latest` and `sha-<short>` (passing `APP_VERSION` into the image), and creates the `vX.Y.Z` tag and GitHub Release from that CHANGELOG section. Pushing a tag publishes nothing.
+- Version: the `VERSION` file (`X.Y.Z`); `package.json` has none. `CHANGELOG.md` has an `## Unreleased` section with `### Added` / `### Changed` / `### Fixed`; every PR into `dev` adds its line there.
+- A release is merging `dev` into `main`. `.github/workflows/publish-image.yml` then runs CI, fails if `vX.Y.Z` already exists, publishes `ghcr.io/huttonhomehub/crane-charts` as `X.Y.Z`, `X.Y`, `latest` and `sha-<short>` (passing `APP_VERSION`), and creates the `vX.Y.Z` tag and GitHub Release from that CHANGELOG section. Pushing a tag publishes nothing.
 - "Ship It" follows `.claude/skills/ship-it/SKILL.md`, which sets `VERSION` and the CHANGELOG on `dev` before merging the release PR.
-- `ci.yml` runs on pushes to `dev` and `claude/**` and PRs into `dev` and `main`. Its `build` job is the one required check: it passes only if `checks` and `e2e` both passed.
-- Dependabot (`.github/dependabot.yml`) opens weekly PRs into `dev` for pip, GitHub Actions and the Python base image. New Python minor or major versions aren't proposed: changing Python also means changing `ci.yml`.
+- `ci.yml` runs on pushes to `dev` and `claude/**` and PRs into `dev` and `main`. Its one job, `build`, is the required check.
+- Dependabot (`.github/dependabot.yml`) opens weekly PRs into `dev` for npm, GitHub Actions and the Node base image. New Node major versions aren't proposed, nor `@types/node` majors: changing Node also means changing `scripts/check.sh`, the Dockerfile and `@types/node` together.
 
-**Settings** follow the shared container standard in `~/projects/CLAUDE.md`: unprefixed names, the same name in every app for the same idea. Every read goes through `env(name, default)` in `app.py`, which falls back to the old `CRANE_` name (`CRANE_DB`, `CRANE_UPLOAD_DIR`, `CRANE_VERSION`, otherwise `CRANE_` + name) and logs one "deprecated" warning per old name in use, after all settings are read. New settings go through `env()` too. The full table is in the README.
+## File map
 
-- `DATA_DIR` — where all state lives (image: `/config`; locally: the working dir). `DB_PATH` and `UPLOADS_DIR` default to `crane.db` and `uploads/` inside it; `BACKUP_DIR` defaults to `backups/` beside the database.
-- `MAX_UPLOAD_MB`, `MAX_FIELD_LEN`, `MAX_RESTORE_MB` — size limits (defaults `500`, `64`, `4096`).
-- `UPLOAD_RATE` / `WRITE_RATE` — Flask-Limiter limits for `POST /api/upload` and other mutating routes (defaults: `60 per minute` each). Bumped from the original 10/30 to give the bulk importer headroom; safe because the app sits behind the tinyauth gate. Applied via `app.config['UPLOAD_RATE'|'WRITE_RATE']` read by a callable in the `@limiter.limit(...)` decorators, so tests/env can override.
-- `TRUST_PROXY` — the number of reverse-proxy hops in front (`0`/unset = off; `true` = 1). Wraps `app.wsgi_app` in Werkzeug's `ProxyFix` with that many hops for `X-Forwarded-For/-Proto/-Host`. Never set it higher than the real number of proxies — a client could then spoof its own scheme/IP and flip the CSRF cookie's `Secure` flag or dodge rate-limit keying. See RR-011/DL-020. Live is `1`: nginx restores the real client IP from Cloudflare's `CF-Connecting-IP` and forwards just that, same as PhotoMapper. A value that isn't a number stops startup.
-- `LOG_LEVEL` — `fatal`/`error`/`warn`/`info`/`debug` (also `trace`, `silent`); default `info`. Anything else stops startup.
-- `APP_VERSION` — release version, passed in by `publish-image.yml` as a build arg.
-- `BACKUP_*`, `DEBUG` — see Backups below and REM-SEC-03.
+```
+server/
+  index.ts            Entry: settings warnings, open the database, rename 1.x backups, listen, schedule backups, graceful shutdown
+  app.ts              createBaseApp … finishApp: routers, /uploads (static, range requests), the built front end
+  config.ts paths.ts  Settings and data locations
+  db.ts               openDb/getDb/closeDb (the handle changes after a restore), kit migrations
+  migrations/         Numbered SQL (001 = 1.x's schema with IF NOT EXISTS); never edit an applied one
+  cranes.ts           Every crane query, the API shape (craneFromRows), the audit log
+  names.ts            1.x's naming rules: crane slug, secure_filename, _2 de-duplication, local ISO timestamps
+  lock.ts             withLock: every change to files and rows together
+  routes/cranes.ts    The crane API (1.x's routes and JSON)
+  routes/backups.ts   /api/backup…, /api/info (the shared shapes, as PhotoMapper)
+  services/backups.ts The kit's backups with prefix crane-backup; 1.x backup renaming
+shared/api.ts         Request and reply types for server and browser
+src/
+  App.tsx             Layout, the open crane (from the #crane/<id> address), dialogs, global shortcuts
+  components/         Sidebar, Viewer (file strip), PdfView (canvas, toolbar, find), MetadataDialog,
+                      BulkImport, DropZone, CommandPalette, SettingsDialog, ShortcutsDialog …
+  hooks/              Every API call (apiFetch, or upload() for progress): catalogue, crane and file actions, settings, the hash
+  lib/                catalogue.ts (sort, group, search, palette, filename parsing), pdf.ts (fit, zoom, find, highlights),
+                      pdfjs.ts (the only PDF.js import, loaded on first use), upload.ts (XHR with progress, 429 retry), keys.ts
+  styles/index.css    Crane's layout on the @hhh/ui tokens
+tests/                Vitest: *.test.ts (server, Node), *.test.tsx (components and hooks, jsdom)
+e2e/                  Playwright, against the built image
+```
 
-**Docker.** The image sets `DATA_DIR=/config` and declares `/config` as its one volume, so a deployment only mounts `/config` (see `deploy/compose.example.yml`). `/apps/crane-charts/config` is the live path on VM 113. It is documentation only: never touched from CT 106. `docker-entrypoint.sh` (R-028) resolves the same paths as `app.py`, remaps the image's `crane` user to `PUID`/`PGID` and chowns the uploads, database and backup directories at container start, so a freshly created (or root-owned) host directory just works — no manual `chown` needed before first start.
+## Invariants
 
-## Rebuild on hhh-platform (phase 4, in progress)
+- **The slug is the crane.** `generateCraneId(make, type, model, capacity)` is the `cranes.id` and the folder name under `uploads/`. Editing the four fields renames the folder, then updates the rows in one transaction; if that fails the folder is renamed back. Keep the pair atomic. Merge-make does the same per crane, or moves files into an existing crane when the new slug is taken.
+- **Every change runs inside `withLock`**, so a file and its rows never disagree, and backups and restores never see them half-done.
+- **The crane routes keep 1.x's JSON** (snake_case included): scripts and the bulk importer depend on it. The primary file is `cranes.primary_file`, else the earliest file; files are listed primary first.
+- **The audit log** (`spec_events`) is append-only: `upload`, `file_add`, `primary_change`, `label_edit`, `file_remove`, `edit`, `delete`, `merge`, `restore`. `logEvent` never throws.
+- **Writes need the CSRF header**: browser code calls the API through `apiFetch` (or `upload()` in `src/lib/upload.ts`, which sends the same header), never bare `fetch`; server tests write through `write()` in `tests/server.ts`.
+- **Errors stay inside dialogs.** A `<dialog>` sits in the browser's top layer, so a toast shown while one is open is hidden behind it. Validation and API errors show in the dialog; toasts are for confirmations after it closes.
+- **Stale async work is discarded**: `PdfView` is keyed by file URL and `Viewer` by crane id, so a slow load or render can't paint over a newer one; documents are destroyed when left.
+- The sidebar renders long makes 60 rows at a time as the list scrolls; a search renders every match. Don't assume every `.model-item` is in the DOM.
 
-Crane Charts is being rebuilt in TypeScript on the shared platform (Node 22, Express 5 on `@hhh/server`, React on `@hhh/ui`), to feature parity, shipping as 2.0.0. Until the final swap PR, **the Python app below is what ships** (Dockerfile, `scripts/check.sh`); the rebuild lives beside it and must not change it.
+## Conventions
 
-- `vendor/hhh-platform/` is a vendored hhh-platform release: never edit it; `npm run vendor:check` enforces it. Upgrade with `node vendor/hhh-platform/scripts/vendor.ts X.Y.Z` in its own PR.
-- Code: `server/` (TypeScript, run directly by Node 22), `server/migrations/` (numbered SQL, `001-baseline.sql` = the Python schema with `IF NOT EXISTS`, so a 1.x database opens unchanged), `tests/*.test.ts` (Vitest, beside the Python tests).
-- API: `server/routes/cranes.ts` keeps the Python app's crane routes and JSON exactly (snake_case included); the shapes are declared once in `shared/api.ts`. Queries and the audit log are in `server/cranes.ts`; 1.x's naming rules (crane slug, Werkzeug's `secure_filename`, `_2` de-duplication, local ISO timestamps) in `server/names.ts`. Every change runs inside `withLock` (`server/lock.ts`), and a slug change renames the folder then updates the rows in one transaction, renaming the folder back if that fails. Backups and `/api/info` (`server/routes/backups.ts`, `server/services/backups.ts`) use the kit and PhotoMapper's reply shapes; `/health` is the kit's (`{status, version}`, no upload count). At startup, 1.x backup names (`…-HHMMSS-ffffff.zip`) are renamed to the kit's (`…-HHMMSS.zip`), which 1.x also lists.
-- Front end: React in `src/` (`App.tsx`, `components/`, `hooks/` for every API call through `apiFetch`, `lib/` for 1.x's rules: natural sort, grouping, search, palette matching, filename parsing), bundled by Vite to `dist/`, which the server serves when present. `index.html` and `public/` are Vite's; `docs/rebuild/frontend-inventory.md` lists everything the 1.x page does, with the selectors its end-to-end tests used, and is the parity checklist until the swap. Component tests are `tests/*.tsx` (jsdom; `tests/dom.tsx` adds dialogs, IntersectionObserver and matchMedia, `tests/fetchStub.ts` a typed fetch, `tests/fakePdf.tsx` a stand-in for `src/lib/pdfjs.ts`, the only module that imports PDF.js); `tsconfig.app.json` checks them with `src/`. Dev: `npm run server` and `npm run dev` (Vite proxies `/api`, `/uploads` and `/version` to port 5000).
-- API tests start the real app on a temporary folder with `startServer()` (`tests/server.ts`: `write()` adds the CSRF cookie and header, `upload()`/`create()`/`addFile()`, `reset()` between tests); `tests/zip.ts` reads and writes zips.
-- Settings: `server/config.ts` reads the same names as `app.py` with the kit's `loadSettings`, including the old `CRANE_` fallbacks.
-- **Checks for the rebuild:** `sh scripts/check-node.sh` runs exactly what CI's `node` job runs: `npm ci && npm run check` in the `node:22-bookworm` container (vendored-platform check, typecheck of the server, browser and e2e code, lint, Prettier over the whole repo except `static/` and `templates/`, Vitest with the 80% gate, the Vite build, npm audit), then `scripts/e2e.sh`. `build` requires the `node` job alongside the Python jobs. Before a push, run both this and the Python check. It writes only the gitignored `node_modules/`, `dist/`, `coverage/` and `e2e-results/`.
-- **End-to-end tests:** `sh scripts/e2e.sh [filter]` starts the built app (`dist/`, `server/` run by Node 22) in a throwaway container as host `crane` on a private network, with its data in the container's `/tmp`, test data only, and runs `e2e/` from the pinned Playwright image. The tests share one server, so each makes cranes with names of its own (`uniq()` in `e2e/fixtures.ts`, which also writes real PDFs with text). The app is plain HTTP there: Chrome's notice that it ignored `Cross-Origin-Opener-Policy` is expected and allowed, nothing else. Screenshots: `SCREENSHOTS=1 sh scripts/e2e.sh screenshots` writes `docs/screenshots/` (both themes, desktop and phone); look at every one before committing them.
-
-## Architecture
-
-Single-process Flask app. State is the `uploads/` directory plus `crane.db` (SQLite). Core files: [app.py](app.py), [templates/index.html](templates/index.html), [static/main.js](static/main.js), [static/main.css](static/main.css).
-
-**A crane owns many files; the slug is the crane identity.** `generate_crane_id(make, type, model, capacity)` produces a deterministic slug (`make_type_model_capacity`, lowercased, non-`[A-Za-z0-9._-]` stripped, 64-char cap per field). That slug is (a) the `cranes.id` primary key, and (b) the crane's directory name under `uploads/<crane_id>/`. Each crane has one-or-many `files`, all living inside that directory. `cranes.primary_file` points at the file that opens by default (NULL falls back to the earliest-uploaded file). `generate_filename()` (slug + `.pdf`) is retained only for its unit test. Editing the four fields renames the crane **directory** (a single atomic `os.rename`) and rewrites `cranes`/`files` — see `PUT /api/metadata/<crane_id>`, which rolls back the directory rename if the DB write fails. The rename+DB write must stay atomic-as-a-pair.
-
-**Metadata storage (SQLite).** `DB_FILE` env var (default `crane.db`) points to the SQLite database. `init_db()` creates `cranes` (id PK, make, type, model, capacity, uploaded_at, updated_at, primary_file), `files` (id PK, crane_id, stored_name, original_filename, label, uploaded_at; `UNIQUE(crane_id, stored_name)`), and `spec_events` (audit log). `list_cranes()` returns a list of crane dicts each with a `files: [...]` list and resolved primary (via `_crane_from_rows`); `get_crane(crane_id)` returns one or None. There is no `load_metadata`/`save_metadata` anymore — routes do targeted SQL. Tests monkeypatch `DB_FILE` to `tmp_path / "crane.db"` and call `app_module.init_db()`.
-
-**Migration.** On import, `_migrate_from_json()` (legacy `metadata.json` → `specs`, now inert) then `_migrate_from_specs()` runs: each old single-file `specs` row becomes a crane with one primary file, its flat `uploads/<slug>.pdf` moving to `uploads/<slug>/<slug>.pdf`. Idempotent (skips existing cranes); renames `specs` → `specs_legacy` on completion so it never re-runs.
-
-**Metadata concurrency.** `metadata_lock()` (a `threading.Lock`) wraps the full disk+DB read-modify-write of every mutating route: `upload_file`, `add_crane_file`, `set_primary_file`, `delete_crane_file`, `update_metadata`, `delete_file`. SQLite WAL handles storage-level concurrency; the threading lock serialises the app-level cycle (e.g. save-file-then-insert-row, or rename-dir-then-update-rows) so disk and DB can't diverge.
-
-**Audit trail.** `log_event(event_type, crane_id, before, after)` appends immutably to `spec_events`. Event types: `upload` (new crane), `file_add`, `primary_change`, `file_remove`, `edit`, `delete`. `before`/`after` are JSON snapshots from `_audit_snapshot()`.
-
-**Multi-file routes & UI.** `POST /api/cranes/<id>/files` (attach a supplementary PDF + optional `label`), `PUT /api/cranes/<id>/primary` (body `{file_id}`), `PATCH /api/cranes/<id>/files/<file_id>` (rename a file's `label`), `DELETE /api/cranes/<id>/files/<file_id>` (delete one file — deleting the last file deletes the whole crane; deleting the primary falls back). `DELETE /api/delete/<crane_id>` deletes the whole crane. Frontend: the sidebar stays one-row-per-crane (a `.model-item__filecount` badge marks cranes with >1 file); all file management lives in a **viewer file strip** (`#file-strip`, built by `viewer._renderStrip()`) — one `.file-chip` per file, click to switch (`viewer.showFile`), ★ to set primary, ✎ to rename, × to delete, plus an "Add file" button. `viewer._applyCrane(updatedCrane)` re-syncs `state.current`/strip/sidebar after a mutation without a full reload. The metadata modal has four modes (`upload` | `edit` | `addfile` | `editlabel`); addfile/editlabel hide the make/type/model/capacity grid and show a label field. Dropping a PDF while a crane is open routes to addfile mode for that crane (with a "Create a new crane instead" escape); dropping with nothing open creates a new crane.
-
-**Bulk import (`bulkImport` module).** Dropping 2+ PDFs (or multi-selecting in the upload picker) opens `#bulk-modal`. `parseFilename()` splits the house convention `Manufacturer Model (Label).pdf` into `{make, model, label}` (make = first word, model = the rest, label = the optional parenthetical). `buildDrafts()` **groups files by `(make, model)`** — a crane's several files share those — so each grid row is one crane with its file(s); this avoids duplicate-slug 409s. The user fills the two fields not in the filename (Type + Capacity; "Set all types" applies down the column), and multi-file cranes show a radio to pick the primary (defaults to the first). `submit()` uploads each crane sequentially: the chosen primary via `POST /api/upload` (carrying its label — the endpoint now accepts an optional `label` for the first file), then the rest via `POST /api/cranes/<id>/files`. `withRetry()` backs off and retries on 429. Rows show ✓/✗; failures stay for a "Retry failed" pass. A single dropped file still uses the metadata modal, now prefilled via `parseFilename()`.
-
-**In-PDF find (`viewer` find methods).** A `#find-bar` (toolbar magnifier, `Ctrl/Cmd+F`, or `/` opens it) searches the open document. `_runFind()` builds a per-page text cache lazily via `page.getTextContent()` (`viewer._find.pageText`, keyed by page), collects item-level matches across all pages, and shows an `X/Y` count. `_drawHighlights()` places `.pdf-highlight` boxes into the `#pdf-highlights` overlay (a sibling of `#pdf-canvas` inside `#pdf-stage`) — positions are computed from each text item's transform composed with the render viewport, expressed in **%** so they track the canvas under any CSS scaling. `renderPage()` stores `_renderViewport`/`_renderPageNum` and redraws highlights after every render; `_loadPdf()`/`openEmpty()` reset the find state. Highlighting is whole-item (a matched text run/cell), not sub-word.
-
-**Pagination.** `GET /api/pdfs?after=<crane_id>&limit=<n>` returns `{"items": [...crane dicts...], "total": N, "next_cursor": "<last-crane-id-of-page>" | null}`. `next_cursor` is the id of the last crane on the current page; the caller sends `?after=<next_cursor>` for the next page. `api.listPdfs(onPage)` in `static/main.js` fetches bounded pages (`PDFS_PAGE_SIZE = 200`) in a loop and invokes `onPage` with each page's items; `loadFileList()` uses this to repaint the sidebar progressively when a catalogue spans more than one page. Each crane item carries `name` (= id, sidebar keying compat), `url` (primary file), and `file_count`.
-
-**Sidebar sort order.** Makes, type headers, and model rows all sort with `naturalCompare` (an `Intl.Collator` with `numeric:true`), so `LTM1750` precedes `LTM11200` — matching Windows Explorer's `StrCmpLogicalW` — rather than pure lexicographic order where `LTM11200` wins on the second digit. Use `naturalCompare` for any new user-facing name ordering.
-
-**Virtual scrolling (sidebar).** `sidebar.selectMake()` doesn't build every `.model-item` row up front — it flattens type headers + rows into `this._modelQueue` and renders `MODEL_RENDER_BATCH_SIZE` (60) at a time via `_appendModelBatch()`. A trailing `.sidebar__sentinel` element, observed by an `IntersectionObserver` rooted on `#model-list`, triggers the next batch as the user scrolls. `sidebar.filter()` calls `_flushModelQueue()` first so text search can match rows that haven't been scrolled into view yet. When adding new sidebar rendering logic, remember rows may not exist in the DOM yet — don't assume `document.querySelectorAll('.model-item')` is exhaustive. Type headers are `<button>`s that toggle `.type-group.is-collapsed` (CSS hides `.model-item` when collapsed); `filter()` force-expands groups on a query so matches aren't hidden. `filter()` also keeps a make visible when the query matches any of its cranes via `sidebar._makeSearchText` (per-make concatenated model/type/capacity/label text built in `renderMakes()`), not just the make name. **Jump-to-make:** the model panel only holds the _selected_ make's rows, and those rows carry no make name — so a query that filters the current selection out of the make panel (e.g. typing a _different_ make's name) auto-selects the first still-visible make (preferring a name match) via `selectMake()`; the `_jumping` flag guards against selectMake's trailing `filter()` re-entry. Model-row matching also folds the selected make's name into each row's haystack, so a make-name query matches all of that make's rows instead of blanking the list.
-
-**CSRF via double-submit cookie.** `_csrf_guard` before-request hook rejects any `POST/PUT/PATCH/DELETE` unless the `crane_csrf` cookie matches the `X-CSRF-Token` header (`secrets.compare_digest`). GETs are exempt. `_csrf_issue` after-request hook mints the cookie if absent. No `SECRET_KEY` and no Flask-WTF — deliberate. Any new mutating route inherits the guard automatically.
-
-**CSP with per-request nonce.** `_csp_nonce` before-request hook generates a nonce; `_csp_header` after-request hook writes it. `script-src` is strict (nonces only, no `unsafe-inline`/`unsafe-eval`); `style-src` retains `'unsafe-inline'` because PDF.js sets `canvas.style.width/height` per-frame. When adding inline JS, always stamp the nonce; when adding inline styles, prefer a CSS class.
-
-**Backups (RR-010).** `create_backup()` writes a timestamped `.zip` to `BACKUP_DIR` (env `BACKUP_DIR`, default `<db dir>/backups`) containing a **consistent** `crane.db` snapshot (via SQLite's `conn.backup()` online API into a temp file — WAL-safe) plus the `uploads/` tree, then `_prune_backups()` trims to `BACKUP_KEEP`. It holds `metadata_lock()` for the DB snapshot. `BACKUP_INCLUDE_UPLOADS=0` makes the zip DB-only (for when `uploads/` is on self-snapshotting storage like a TrueNAS/ZFS share). `_backup_scheduler()` is a daemon thread started at import by `start_backup_scheduler()` — it sleeps `min(300, interval)` then backs up every `BACKUP_INTERVAL_HOURS`; gated by `BACKUP_ENABLED` (both conftests set it to `0`, and monkeypatch `BACKUP_DIR`, so tests never spawn the thread or write into the repo). Routes: `GET /api/backup` (status + list), `POST /api/backup` (backup now), `GET /api/backup/download` (stream a fresh zip), `GET /api/backup/download/<name>` (serve an existing backup file — restricted to the `crane-backup-*.zip` pattern, `send_from_directory` prevents traversal). `BACKUP_DIR` is a module global computed from `DB_FILE` at import, so tests that repoint `DB_FILE` must also set `BACKUP_DIR`.
-
-**Restore (RR-010).** `POST /api/backup/restore` (`WRITE_RATE`-limited) replaces the live catalogue with a backup — two modes: JSON `{name}` restores an existing (app-created, trusted) backup from `BACKUP_DIR` (name validated against the `crane-backup-*.zip` pattern, no `/` or `\`); a multipart `file` restores an **uploaded** zip (disaster recovery onto a fresh instance — subject to the global `MAX_CONTENT_LENGTH`; drop huge zips into `BACKUP_DIR` and restore by name instead). `_restore_from_zip()` is the core: (1) validate the archive and its DB _before_ touching live data — `_classify_backup_members()` rejects path-traversal/absolute arcnames and guards `MAX_RESTORE_UNCOMPRESSED` (env `MAX_RESTORE_MB`, default 4096) against zip bombs, and `_validate_restore_db()` confirms the extracted DB is real SQLite with `cranes`/`files`; (2) take a **labelled pre-restore safety backup** (`…-prerestore.zip`) so a restore is itself reversible; (3) under `metadata_lock()`, swap uploads first then the DB last (source of truth) via `os.rename`/`os.replace` on the same filesystem (staging dir is created beside `DB_FILE` so the replace is atomic, not cross-device), dropping stale `-wal`/`-shm` sidecars. Logs a `restore` event **into the now-current DB** (post-swap) with the source + summary. Returns `{success, cranes, restored_uploads, safety_backup}`.
-
-**Settings panel (`settings` module).** The app-bar gear (`#settings-btn`) opens `#settings-modal` — a read-only view: a **Backups** card (status badge, schedule/target from `GET /api/backup`, "Back up now" → `POST /api/backup`, "Download fresh", a list of existing backups each linking to `/api/backup/download/<name>` with a **Restore** button (→ `POST /api/backup/restore {name}`), and an **Upload & restore** control for an external zip) and a **This instance** card (`GET /api/info`: version, crane/file counts, data paths, limits, proxy) plus an export link. Deployment config is _not_ editable here — it lives in env/compose (some is read-once, and `TRUST_PROXY` is a security control that must not be UI-toggleable).
-
-**Data hygiene & fast retrieval (`FACETS·PALETTE·DEEP LINKS` region).** Three v1.7.0 features share this JS region:
-
-- **Autocomplete.** `GET /api/facets` returns `{makes:[...], types:[...]}` (distinct non-empty values, `COLLATE NOCASE`). `refreshFacets()` (called after every `loadFileList()` and after a merge) fills the `#facet-makes`/`#facet-types` `<datalist>`s (native autocomplete on the upload modal's make/type inputs and the bulk grid's cells) and the merge tool's two `<select>`s.
-- **Merge manufacturers.** `POST /api/merge-make` (body `{from, into}`, `WRITE_RATE`-limited, under `metadata_lock()`) moves every crane off a mistyped make onto the correct one. For each source crane it recomputes `new_id = generate_crane_id(into, type, model, capacity)`: if that slug is free it **renames** (os.rename dir + UPDATE cranes id/make + UPDATE files crane_id); if it collides with an existing crane it **absorbs** (move/dedupe each file into the target dir, INSERT files rows, DELETE source rows, rmtree old dir). Returns `{success, moved, absorbed}`; logs a `merge` event. Validates 400 (missing/equal fields), 404 (no source cranes). UI lives in the Settings panel's "Merge manufacturers" card (confirm dialog → toast → `loadFileList()` + `refreshFacets()`).
-- **Command palette.** `Ctrl/Cmd+K` (or clicking the search box's kbd hint) opens `#palette-modal`. `palette.run()` filters `state.files` client-side: a capacity-range query (`>=N`, `>N`, `≥N`, or `N+`) shows all cranes ≥N sorted **ascending** by capacity (`parseCapacity()` extracts the leading number); otherwise a fuzzy substring match (`terms.every(t => haystack.includes(t))`) across make/model/type/capacity. Caps 60 results; ArrowUp/Down/Enter/Escape; Enter → `openCrane()`.
-- **Deep links.** `openCrane(crane)` selects the make, opens the primary file, flushes the virtual-scroll queue, and highlights the row. `viewer.openFile()` calls `deepLink.set(id)` (sets `location.hash = '#crane/<id>'` with a suppress flag to avoid a feedback loop); `deepLink.resolve()` (run once after the initial `loadFileList()`, plus on `hashchange`) reads the hash and opens the matching crane. A share/bookmark of `…/#crane/<id>` opens that crane on load.
-
-**Versioning & cache-busting.** `APP_VERSION` (env `APP_VERSION`, default `dev`) is stamped into the image at build time by `publish-image.yml`, from the `VERSION` file (`build-args: APP_VERSION=...`). It shows in the app-bar (`.app-bar__version`) and at `GET /version` (also on `/health`). Templates reference `main.js`/`main.css` via the `versioned_static()` context helper, which appends `?v=<md5[:8]>` of the file's bytes — so a new deploy always serves fresh assets with no hard-refresh. `_ASSET_HASHES` caches per file; only the two app assets are versioned (the vendored pdf.js is stable).
-
-**Errors as JSON.** The global `HTTPException` handler rewrites every 4xx/5xx into `{"error": "..."}`. Bare `except` clauses log via `app.logger.exception()` and return `{"error": "Internal server error"}` — never `str(e)`. The XHR client depends on JSON — do not return HTML error pages.
-
-**Frontend.** [static/main.js](static/main.js) is the extracted ES module. [templates/index.html](templates/index.html) loads it with the CSP nonce. The JS is divided into labelled regions: `STATE`, `API`, `TOAST`, `THEME`, `MODAL`, `METADATA MODAL`, `BULK IMPORT`, `SHORTCUTS`, `SETTINGS`, `FACETS·PALETTE·DEEP LINKS`, `DROPZONE`, `SIDEBAR`, `VIEWER`, `INIT`. Modals use native `<dialog>` (`showModal()` → browser **top layer**, above all normally-positioned content). Consequence (DL-024): anything that must be visible while a dialog is open must live **inside** the dialog — a `toast` fired during a modal action renders behind the dialog's `::backdrop`. The metadata modal shows action errors inline via `#modal-error` (`showError()`), not a toast. CSS breakpoints are CSS custom properties (`--bp-mobile`, `--bp-tablet`) read by JS via `getComputedStyle`.
-
-## Testing constraints
-
-`tests/conftest.py` monkeypatches `UPLOAD_FOLDER` and `DB_FILE` onto `tmp_path` per test, then calls `app_module.init_db()` to create the tables in the test database. Tests never touch the developer's real catalogue. The `csrf` fixture mints a token via `GET /api/pdfs`.
-
-The concurrent-writes test (`test_concurrent_metadata_writes_serialize`) spawns 20 threads calling `metadata_lock()` — if you refactor the lock, this is the guardrail.
-
-`tests/e2e/conftest.py` starts a live Flask server on a free port using `werkzeug.serving.make_server`. The `live_server` fixture is session-scoped (one server per run); `page` is function-scoped (fresh browser per test). E2E tests upload unique files per test and track them by `data-filename` attribute.
-
-## Manual QA
-
-`pytest` doesn't exercise the browser fully. After UI changes, walk [QA-CHECKLIST.md](QA-CHECKLIST.md) — it covers theme toggle, drag-drop, modals, mobile drawer, fullscreen, keyboard shortcuts, and focus restoration on delete.
+- Named exports only; no `any`, no `!` (use `must()` in tests), no dynamic `delete`. React: no `setState` directly in an effect (derive the value, or adjust state during render when a prop changes).
+- Never hard-code a colour or font size: `@hhh/ui` tokens only, in both themes. Accent text never sits on `--bg-surface-sunken`.
+- New API calls go in a hook under `src/hooks/`; components never call `fetch` or `apiFetch`.
+- Commits: imperative and focused.
