@@ -1,4 +1,4 @@
-import { CheckCircle2, Pencil, Star, Trash2 } from 'lucide-react';
+import { CheckCircle2, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button, ConfirmDialog, Dialog, TextField } from '@hhh/ui';
 import type { Crane, CraneFile } from '../../shared/api.ts';
@@ -15,13 +15,15 @@ export interface ViewerProps {
   /** Its last file was deleted, which deletes the crane. */
   onDeleted: () => void;
   notify: (message: string, kind?: 'info' | 'success' | 'error') => void;
+  /** "Add file": opens the add-file dialog for this crane. */
+  onAddFile: () => void;
 }
 
 /**
  * The open crane: a strip with one chip per file (open, set as main, rename, delete),
  * then the chosen file in the PDF view. Opens on the crane's main file.
  */
-export function Viewer({ crane, onChanged, onDeleted, notify }: ViewerProps) {
+export function Viewer({ crane, onChanged, onDeleted, notify, onAddFile }: ViewerProps) {
   const actions = useFileActions();
   const [chosen, setChosen] = useState<number | null>(null);
   const [find, setFind] = useState<FindState>({ open: false, query: '' });
@@ -125,6 +127,15 @@ export function Viewer({ crane, onChanged, onDeleted, notify }: ViewerProps) {
             </div>
           );
         })}
+        <button
+          type="button"
+          id="file-strip-add"
+          className="file-strip__add"
+          title="Add a supplementary PDF to this crane"
+          onClick={onAddFile}
+        >
+          <Plus size={14} aria-hidden /> Add file
+        </button>
       </div>
 
       {file ? (

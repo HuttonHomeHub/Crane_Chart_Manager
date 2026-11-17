@@ -9,6 +9,7 @@ import { PAGE_SIZE } from '../src/hooks/useCatalogue.ts';
 import { setNarrow, setUpDom } from './dom.tsx';
 import { crane } from './factories.ts';
 import { fakePdfs } from './fakePdf.tsx';
+import { stubXhr } from './fakeXhr.tsx';
 import { isGet, stubFetch, type Route } from './fetchStub.ts';
 
 vi.mock('../src/lib/pdfjs.ts', () => import('./fakePdf.tsx'));
@@ -249,6 +250,142 @@ describe('links', () => {
       await screen.findByRole('heading', { name: 'No specifications uploaded yet' })
     ).toBeInTheDocument();
     expect(routeCalls.filter((c) => c.startsWith('GET /api/pdfs')).length).toBeGreaterThan(1);
+  });
+});
+
+describe('uploading and editing', () => {
+  const pdf = (name: string) => new File(['%PDF-1.4'], name, { type: 'application/pdf' });
+  const drop = (files: File[]) =>
+    fireEvent(
+      window,
+      Object.assign(new Event('drop', { bubbles: true, cancelable: true }), {
+        dataTransfer: { types: ['Files'], files },
+      })
+    );
+
+  it('uploads from the app bar, then reloads the list', async () => {
+    const fetchMock = api([lr]);
+    stubXhr(() => ({ status: 201, body: ac }));
+    renderApp();
+    await screen.findByText('LR1300');
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    const dialog = screen.getByRole('dialog', { name: 'Upload crane specification' });
+    fireEvent.change(within(dialog).getByLabelText('PDF file'), {
+      target: { files: [pdf('Tadano AC 500.pdf')] },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Type'), { target: { value: 'Mobile' } });
+    fireEvent.change(within(dialog).getByLabelText('Rated capacity'), {
+      target: { value: '500t' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Upload' }));
+    expect(await screen.findByText('Specification uploaded')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Upload crane specification' })).toBeNull()
+    );
+    const listLoads = fetchMock.mock.calls.filter(([u]) => String(u).startsWith('/api/pdfs'));
+    expect(listLoads.length).toBeGreaterThan(1);
+  });
+
+  it('routes a drop: upload with nothing open, add-file with a crane open, bulk for several', async () => {
+    api([lr]);
+    fakePdfs.set(lr.files[0]?.url ?? '', [['x']]);
+    renderApp();
+    await screen.findByText('LR1300');
+    drop([new File(['x'], 'notes.txt')]);
+    expect(await screen.findByText('Only PDF files can be uploaded.')).toBeInTheDocument();
+    drop([pdf('Grove GMK.pdf')]);
+    let dialog = screen.getByRole('dialog', { name: 'Upload crane specification' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByText('LR1300'));
+    await screen.findByRole('tablist');
+    drop([pdf('dims.pdf')]);
+    dialog = screen.getByRole('dialog', { name: 'Add file to Liebherr LR1300' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Create a new crane instead/ }));
+    expect(screen.getByRole('dialog', { name: 'Upload crane specification' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    drop([pdf('A B.pdf'), pdf('C D.pdf')]);
+    expect(screen.getByRole('dialog', { name: 'Import several PDFs' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    drop([]);
+  });
+
+  it('adds a file from the strip and shows it', async () => {
+    const withExtra = crane(
+      { make: 'Liebherr', type: 'Crawler', model: 'LR1300', capacity: '300t' },
+      ['Dims']
+    );
+    let list = [lr];
+    stubFetch((url) => {
+      if (url === '/version') return { body: { version: '2.0.0' } };
+      if (url === '/api/facets') return { body: { makes: ['Liebherr'], types: [] } };
+      return { body: { items: list, total: list.length, next_cursor: null } };
+    });
+    stubXhr(() => {
+      list = [withExtra];
+      return { status: 201, body: { success: true, ...withExtra } };
+    });
+    for (const f of [...lr.files, ...withExtra.files]) fakePdfs.set(f.url, [['x']]);
+    renderApp();
+    fireEvent.click(await screen.findByText('LR1300'));
+    fireEvent.click(await screen.findByRole('button', { name: /Add file/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Add file to Liebherr LR1300' });
+    fireEvent.change(within(dialog).getByLabelText('PDF file'), {
+      target: { files: [pdf('dims.pdf')] },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add file' }));
+    expect(await screen.findByText('File added')).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Dims' })).toBeInTheDocument();
+  });
+
+  it('edits from the sidebar, following a renamed open crane to its new address', async () => {
+    const renamed = { ...lr, id: 'liebherr_crawler_lr1300_350t', name: 'x', capacity: '350t' };
+    let list = [lr];
+    stubFetch((url, init) => {
+      if (url === '/version') return { body: { version: '2.0.0' } };
+      if (url === '/api/facets') return { body: { makes: ['Liebherr'], types: ['Crawler'] } };
+      if (url.startsWith('/api/pdfs'))
+        return { body: { items: list, total: list.length, next_cursor: null } };
+      if (init.method === 'PUT') {
+        list = [renamed];
+        return { body: { success: true, renamed: true, old_name: lr.id, ...renamed } };
+      }
+      return { status: 404 };
+    });
+    fakePdfs.set(lr.files[0]?.url ?? '', [['x']]);
+    renderApp();
+    fireEvent.click(await screen.findByText('LR1300'));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit metadata' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit specification' });
+    fireEvent.change(within(dialog).getByLabelText('Rated capacity'), {
+      target: { value: '350t' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Saved & renamed')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toBe(`#crane/${renamed.id}`));
+    expect(await screen.findByText('350t', { selector: '#info-capacity' })).toBeInTheDocument();
+  });
+
+  it('imports several PDFs and reports it', async () => {
+    api([]);
+    stubXhr((_url, form) => ({ status: 201, body: { id: String(form.get('make')) } }));
+    renderApp();
+    await screen.findByText('No specifications yet.');
+    fireEvent.click(screen.getByRole('button', { name: 'Upload your first spec' }));
+    fireEvent.change(screen.getByLabelText('PDF file'), {
+      target: { files: [pdf('A One.pdf'), pdf('B Two.pdf')] },
+    });
+    const dialog = screen.getByRole('dialog', { name: 'Import several PDFs' });
+    fireEvent.change(within(dialog).getByLabelText('Set all types'), {
+      target: { value: 'Mobile' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply to all' }));
+    for (const input of within(dialog).getAllByLabelText('capacity'))
+      fireEvent.change(input, { target: { value: '1t' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
+    expect(await screen.findByText('Imported 2 cranes')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Import several PDFs' })).toBeNull()
+    );
   });
 });
 

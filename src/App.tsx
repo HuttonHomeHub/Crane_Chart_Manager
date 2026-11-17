@@ -1,10 +1,13 @@
-import { Search } from 'lucide-react';
+import { Search, Upload } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { AppBar, ConfirmDialog, useToast } from '@hhh/ui';
+import { AppBar, Button, ConfirmDialog, useToast } from '@hhh/ui';
 import type { Crane } from '../shared/api.ts';
+import { BulkImport } from './components/BulkImport.tsx';
 import { CraneIcon } from './components/CraneIcon.tsx';
+import { DropZone } from './components/DropZone.tsx';
 import { EmptyState } from './components/EmptyState.tsx';
 import { InfoBar } from './components/InfoBar.tsx';
+import { MetadataDialog, type MetaRequest, type MetaResult } from './components/MetadataDialog.tsx';
 import { SettingsDialog } from './components/SettingsDialog.tsx';
 import { Viewer } from './components/Viewer.tsx';
 import { Sidebar, makeForQuery } from './components/Sidebar.tsx';
@@ -13,7 +16,8 @@ import { useCraneActions } from './hooks/useCraneActions.ts';
 import { useMediaQuery } from './hooks/useMediaQuery.ts';
 import { useAppVersion } from './hooks/useSettings.ts';
 import { useHashCrane } from './hooks/useHashCrane.ts';
-import { groupCatalogue } from './lib/catalogue.ts';
+import { groupCatalogue, isPdf } from './lib/catalogue.ts';
+import { plural } from './lib/format.ts';
 
 /** Below this width the sidebar is a drawer (1.x's --bp-tablet). */
 export const DRAWER_QUERY = '(max-width: 900px)';
@@ -46,6 +50,9 @@ export function App() {
   const [pendingDelete, setPendingDelete] = useState<Crane | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // The upload/edit/add-file dialog (a new key each time, so it opens fresh) and bulk import.
+  const [meta, setMeta] = useState<{ key: number; request: MetaRequest } | null>(null);
+  const [bulk, setBulk] = useState<{ key: number; files: File[] } | null>(null);
 
   const narrow = useMediaQuery(DRAWER_QUERY);
   const drawerOpen = narrow && drawer;
@@ -90,6 +97,39 @@ export function App() {
     }
   };
 
+  const startMeta = (request: MetaRequest) => setMeta({ key: Date.now(), request });
+  const startBulk = (files: File[]) => {
+    setMeta(null);
+    setBulk({ key: Date.now(), files });
+  };
+
+  /** A drop on the window: several files import in bulk; one PDF uploads, or joins the open crane. */
+  const dropped = (files: File[]) => {
+    if (files.length > 1) {
+      startBulk(files);
+      return;
+    }
+    const [file] = files;
+    if (!file) return;
+    if (!isPdf(file)) toast('Only PDF files can be uploaded.', 'error');
+    else if (current) startMeta({ mode: 'addfile', crane: current, file });
+    else startMeta({ mode: 'upload', file });
+  };
+
+  const saved = (result: MetaResult) => {
+    setMeta(null);
+    if (result.mode === 'upload') toast('Specification uploaded', 'success');
+    else if (result.mode === 'addfile') {
+      toast('File added', 'success');
+      patch(result.crane);
+    } else {
+      toast(result.crane.renamed ? 'Saved & renamed' : 'Saved', 'success');
+      // A new slug is a new address: follow the crane if it was open.
+      if (result.crane.renamed && current?.id === result.oldId) openCrane(result.crane.id);
+    }
+    void reload();
+  };
+
   const deleteName = pendingDelete
     ? `${pendingDelete.model || pendingDelete.name}${pendingDelete.capacity ? ` (${pendingDelete.capacity})` : ''}`
     : '';
@@ -103,6 +143,16 @@ export function App() {
         menuOpen={drawerOpen}
         {...(narrow ? { onMenu: () => setDrawer((d) => !d) } : {})}
         onSettings={() => setSettingsOpen(true)}
+        actions={
+          <Button
+            id="upload-trigger"
+            variant="primary"
+            icon={<Upload size={16} aria-hidden />}
+            onClick={() => startMeta({ mode: 'upload' })}
+          >
+            Upload
+          </Button>
+        }
         search={
           <label className="app-search" role="search">
             <Search size={16} aria-hidden />
@@ -136,6 +186,7 @@ export function App() {
           revealId={current?.id}
           focusId={focusId}
           onOpen={open}
+          onEdit={(crane) => startMeta({ mode: 'edit', crane })}
           onDelete={(crane) => {
             setDeleteError(null);
             setPendingDelete(crane);
@@ -153,6 +204,7 @@ export function App() {
                 key={current.id}
                 crane={current}
                 notify={toast}
+                onAddFile={() => startMeta({ mode: 'addfile', crane: current })}
                 onChanged={(updated) => {
                   patch(updated);
                   void reload();
@@ -164,10 +216,43 @@ export function App() {
               />
             </>
           ) : (
-            <EmptyState hasCranes={cranes.length > 0} />
+            <EmptyState
+              hasCranes={cranes.length > 0}
+              onUpload={() => startMeta({ mode: 'upload' })}
+            />
           )}
         </main>
       </div>
+      <DropZone onDrop={dropped} />
+      {meta ? (
+        <MetadataDialog
+          key={meta.key}
+          request={meta.request}
+          facets={facets}
+          onClose={() => setMeta(null)}
+          onSaved={saved}
+          onBulk={startBulk}
+          onSwitch={startMeta}
+        />
+      ) : null}
+      {bulk ? (
+        <BulkImport
+          key={bulk.key}
+          files={bulk.files}
+          facets={facets}
+          onClose={() => {
+            setBulk(null);
+            void reload();
+          }}
+          onImported={(done, failed) => {
+            void reload();
+            if (!failed) {
+              setBulk(null);
+              toast(`Imported ${plural(done, 'crane')}`, 'success');
+            }
+          }}
+        />
+      ) : null}
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
