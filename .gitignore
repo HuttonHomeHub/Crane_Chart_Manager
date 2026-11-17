@@ -22,3 +22,8 @@ backups/
 # Coverage artifacts
 .coverage
 htmlcov/
+
+# TypeScript rebuild (phase 4)
+node_modules/
+dist/
+coverage/

@@ -1,0 +1,32 @@
+{
+  "name": "@hhh/config",
+  "version": "0.3.0",
+  "description": "Shared TypeScript, ESLint, Prettier, Vitest and Vite settings for HuttonHomeHub apps",
+  "type": "module",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./eslint": "./eslint.js",
+    "./prettier": "./prettier.js",
+    "./vitest": "./vitest.ts",
+    "./vite": "./vite.ts"
+  },
+  "files": [
+    "tsconfig.base.json",
+    "eslint.js",
+    "prettier.js",
+    "vitest.ts",
+    "vite.ts"
+  ],
+  "requiredTools": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "globals": "^17.0.0",
+    "prettier": "^3.10.0",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.1.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^7.1.0",
+    "vite": "^8.3.0"
+  },
+  "requiredToolsNote": "Install these in the app as devDependencies, pinned exactly. Listed here instead of peerDependencies because npm 10 crashes resolving peers inside a workspace."
+}

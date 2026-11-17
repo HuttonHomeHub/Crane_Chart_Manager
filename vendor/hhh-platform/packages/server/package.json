@@ -1,0 +1,28 @@
+{
+  "name": "@hhh/server",
+  "version": "0.3.0",
+  "description": "HuttonHomeHub server kit: settings, logging, errors, security, CSRF, rate limits, health routes, shutdown, database, migrations, write lock, backups and restore",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "requiredDependencies": {
+    "better-sqlite3": "^13.1.0",
+    "compression": "^1.8.0",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.0",
+    "zod": "^4.6.0"
+  },
+  "requiredDependenciesNote": "Install these in the app (dependencies). Listed here instead of peerDependencies because npm 10 crashes resolving peers inside a workspace. Ships compiled JavaScript: Node won't run TypeScript from inside node_modules."
+}

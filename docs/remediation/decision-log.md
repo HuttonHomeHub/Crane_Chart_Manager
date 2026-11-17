@@ -230,13 +230,14 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Date:** 2026-07-06  
 **Finding:** R-027 (new, raised by moving off Codespaces onto self-hosted Docker + nginx)  
 **Decision:** Two changes, both scoped to the deployment layer rather than the application's security model:
+
 1. Wrap `app.wsgi_app` in Werkzeug's `ProxyFix` (`x_for=1, x_proto=1, x_host=1`), but only when `CRANE_TRUST_PROXY=1` is explicitly set.
 2. Drop the Dockerfile's Gunicorn worker count from 2 to 1.
 3. Access control for the new deployment (Docker behind the user's own nginx, no longer inside Codespaces) is delegated to nginx — basic auth, mTLS, or an IP allowlist — rather than adding an app-level login. R-002 remains ACCEPTED_RISK; RR-001's conditions are updated to point at the nginx gate instead of Codespaces' network isolation.
 
-**Rationale:** Once the app sits behind nginx, two silent correctness bugs would otherwise ship: (a) `request.is_secure` and `get_remote_address()` read straight from the raw WSGI environ, which reflects nginx's own connection to the app, not the browser's connection to nginx — so the CSRF cookie would never get the `Secure` flag, and rate-limit keys would collapse onto nginx's single IP for every real client; (b) `Flask-Limiter`'s `storage_uri="memory://"` keeps counters in one process's memory, so a second Gunicorn worker silently doubles every configured limit (10/min becomes ~20/min in aggregate). Gating `ProxyFix` behind an explicit env var (rather than trusting forwarded headers unconditionally) matters because *any* client can send `X-Forwarded-Proto`/`X-Forwarded-For` headers directly — trusting them by default in a config where there is no proxy in front would let a client spoof its own scheme/IP. On auth: R-002's original acceptance rationale was "network-level isolation provides access control for the current deployment model" (DL-002) — nginx sitting in front of Docker is a different but equally valid instance of that same pattern (gate at the edge, keep the app simple), so re-litigating into app-level login wasn't necessary — it just needed the gate moved from Codespaces' port-forwarding to nginx.
+**Rationale:** Once the app sits behind nginx, two silent correctness bugs would otherwise ship: (a) `request.is_secure` and `get_remote_address()` read straight from the raw WSGI environ, which reflects nginx's own connection to the app, not the browser's connection to nginx — so the CSRF cookie would never get the `Secure` flag, and rate-limit keys would collapse onto nginx's single IP for every real client; (b) `Flask-Limiter`'s `storage_uri="memory://"` keeps counters in one process's memory, so a second Gunicorn worker silently doubles every configured limit (10/min becomes ~20/min in aggregate). Gating `ProxyFix` behind an explicit env var (rather than trusting forwarded headers unconditionally) matters because _any_ client can send `X-Forwarded-Proto`/`X-Forwarded-For` headers directly — trusting them by default in a config where there is no proxy in front would let a client spoof its own scheme/IP. On auth: R-002's original acceptance rationale was "network-level isolation provides access control for the current deployment model" (DL-002) — nginx sitting in front of Docker is a different but equally valid instance of that same pattern (gate at the edge, keep the app simple), so re-litigating into app-level login wasn't necessary — it just needed the gate moved from Codespaces' port-forwarding to nginx.
 
-**Consequences:** `CRANE_TRUST_PROXY=1` must be set whenever the app runs behind nginx (or any reverse proxy) — forgetting it silently reintroduces the `Secure`-flag and rate-limit-keying bugs, but degrades safely (cookie just isn't marked Secure; rate limiting still works, just keyed on the proxy's IP). Running two proxy hops (e.g. nginx behind a CDN) would need `x_for=2` etc. — not handled, since only a single nginx hop is in scope right now. Gunicorn now runs with a single worker; if throughput ever requires more, `storage_uri` must move to a shared backend (e.g. Redis) *before* adding workers back, or the rate-limiter split-brain returns. New regression test `test_forwarded_proto_ignored_without_trust_proxy` guards the fail-safe default; the opt-in path was verified manually (not by an automated test, to avoid reloading the `app` module mid-suite and destabilising shared fixture state) — confirmed the CSRF cookie gets `Secure` when `CRANE_TRUST_PROXY=1` and `X-Forwarded-Proto: https` is sent.
+**Consequences:** `CRANE_TRUST_PROXY=1` must be set whenever the app runs behind nginx (or any reverse proxy) — forgetting it silently reintroduces the `Secure`-flag and rate-limit-keying bugs, but degrades safely (cookie just isn't marked Secure; rate limiting still works, just keyed on the proxy's IP). Running two proxy hops (e.g. nginx behind a CDN) would need `x_for=2` etc. — not handled, since only a single nginx hop is in scope right now. Gunicorn now runs with a single worker; if throughput ever requires more, `storage_uri` must move to a shared backend (e.g. Redis) _before_ adding workers back, or the rate-limiter split-brain returns. New regression test `test_forwarded_proto_ignored_without_trust_proxy` guards the fail-safe default; the opt-in path was verified manually (not by an automated test, to avoid reloading the `app` module mid-suite and destabilising shared fixture state) — confirmed the CSRF cookie gets `Secure` when `CRANE_TRUST_PROXY=1` and `X-Forwarded-Proto: https` is sent.
 
 ---
 
@@ -248,13 +249,14 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Decision:** Break the original 1:1 "a crane IS its PDF" identity (DL-era `specs.filename` PK) into a proper `cranes` (1) → `files` (N) model. The crane slug (`make_type_model_capacity`) stays the identity — now `cranes.id` and the per-crane directory name `uploads/<crane_id>/` — and each file lives inside that directory. "Main file" is a single `cranes.primary_file` pointer (not an `is_primary` flag per file). Deleting a crane's last file deletes the whole crane. UI: sidebar stays one-row-per-crane (with a file-count badge); all file management lives in a viewer "file strip".
 
 **Options considered:**
-- **A — JSON `files` column on the spec row.** Rejected: reintroduces exactly the queryability/audit smell that R-019 removed by migrating *off* a JSON blob.
+
+- **A — JSON `files` column on the spec row.** Rejected: reintroduces exactly the queryability/audit smell that R-019 removed by migrating _off_ a JSON blob.
 - **B — one flat table + `crane_key`/`is_primary` columns.** Rejected: duplicates crane metadata across every file row (edit touches N rows, drift risk); crane existence becomes implicit.
 - **C — two tables (chosen).** Normalised, queryable, audit-friendly; the faithful continuation of the SQLite migration.
 - Disk sub-choice **C1 (slug-keyed dirs, chosen)** vs **C2 (surrogate uuid ids, slug display-only).** C1 preserves the codebase's "eyeball `uploads/`" property and keeps metadata-edit at a single directory rename; C2 would have deleted the rename-atomicity machinery entirely but is a bigger break and opaque on disk — overkill for this tool. User approved C1 defaults.
 - UI **viewer strip (chosen)** vs **expandable sidebar rows.** The strip keeps the R-017 virtual-scrolling sidebar untouched (its batched render queue would have to grow expand/collapse state otherwise) and puts file management where the document is.
 
-**Rationale:** "Main" is purely a default-open pointer — it doesn't rename files or change the slug — so it maps cleanly onto one nullable FK, which *structurally* guarantees exactly one primary (vs N booleans to keep mutually exclusive). Files were made supplementary (not versions), so no supersession/ordering logic is needed. `list_cranes()`/`get_crane()` replace `load_metadata()`/`save_metadata()`; routes now do targeted SQL rather than whole-table DELETE+INSERT (an improvement over the DL-015 shortcut). `metadata_lock()` still wraps each route's full disk+DB sequence.
+**Rationale:** "Main" is purely a default-open pointer — it doesn't rename files or change the slug — so it maps cleanly onto one nullable FK, which _structurally_ guarantees exactly one primary (vs N booleans to keep mutually exclusive). Files were made supplementary (not versions), so no supersession/ordering logic is needed. `list_cranes()`/`get_crane()` replace `load_metadata()`/`save_metadata()`; routes now do targeted SQL rather than whole-table DELETE+INSERT (an improvement over the DL-015 shortcut). `metadata_lock()` still wraps each route's full disk+DB sequence.
 
 **Migration:** `_migrate_from_specs()` runs once on import — each `specs` row → one crane + one primary file, its flat `uploads/<slug>.pdf` moving into `uploads/<slug>/`. Idempotent (skips existing cranes); renames `specs` → `specs_legacy` so it never re-runs and the old rows survive for rollback. Verified against a synthesised v1.0.1-shaped DB (file moved, `specs_legacy` retained, second boot inert).
 
@@ -268,6 +270,7 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Finding:** F-002, F-003 (new features following DL-021's multi-file model)
 
 **Decisions:**
+
 1. **Editable file labels (F-002a).** New `PATCH /api/cranes/<id>/files/<file_id>` updates `files.label`; the strip chip gains a ✎ action that opens the metadata modal in a new `editlabel` mode (label field only). Chose modal reuse over inline-edit for consistency with the existing accessible-dialog pattern (R-015) — no new focus-management surface.
 2. **Drag-to-add-to-crane (F-002b).** A PDF dropped while a crane is open now routes to `addfile` mode targeted at that crane, rather than always starting a new crane. The modal names the crane and offers a "Create a new crane instead" link that switches to `upload` carrying the same pending file — so the default is low-friction but never traps the user. Nothing commits until submit, so the "guess" is safe.
 3. **In-PDF find (F-003).** Implemented as a self-contained overlay rather than wiring PDF.js's `PDFFindController`/viewer components (which assume the `pdf_viewer` module, not this bespoke canvas renderer). `getTextContent()` per page builds a lazy cache; matches are item-level (a text run/cell containing the query); highlights are `<div>`s positioned in **%** of the page inside a `#pdf-highlights` overlay, computed from the item transform × render viewport. Percentages (not px) keep highlights aligned when `max-width:100%` scales the canvas. Verified visually: highlights land exactly on the matching lines/cells.
@@ -284,9 +287,10 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Finding:** F-004 (new feature — seed the catalogue by dropping many PDFs at once)
 
 **Decisions:**
+
 1. **Group by parsed (make, model), one grid row = one crane.** The house convention `Manufacturer Model (Label).pdf` encodes make + model + a per-file label (the parenthetical), and the whole point of the parenthetical is that a crane has several files. So the importer groups files by (make, model) into one crane rather than one-file-one-crane. This is not just ergonomic — one-file-one-crane would generate duplicate crane slugs for a crane's multiple files and 409 on the second, forcing manual cleanup. Grouping sidesteps that entirely.
 2. **Annotate-first, client-held (no staging table).** Files stay as browser `File` objects until submit; nothing hits the server until the user fills Type + Capacity (the two fields not in the filename) and clicks Import. Chosen over a server-side "inbox" (upload-first) because the user confirmed this is a one-time seed — an inbox data-model addition wasn't worth it. Tradeoff: closing the tab mid-import loses unsubmitted rows.
-3. **Primary selection in the grid.** Single-file crane → its only file is primary automatically. Multi-file crane → a radio per file, defaulting to the first, so the user picks the main chart during import. Implemented by uploading the chosen file *first* (it becomes the crane's primary by construction), then the rest — no separate set-primary call.
+3. **Primary selection in the grid.** Single-file crane → its only file is primary automatically. Multi-file crane → a radio per file, defaulting to the first, so the user picks the main chart during import. Implemented by uploading the chosen file _first_ (it becomes the crane's primary by construction), then the rest — no separate set-primary call.
 4. **Raise + config-drive the rate limits.** Bulk uploads would trip the old 10/min upload cap. Limits are now `app.config['UPLOAD_RATE'|'WRITE_RATE']` (default 60/min, env `CRANE_UPLOAD_RATE`/`CRANE_WRITE_RATE`), read via a callable in the `@limiter.limit` decorators so tests pin them low and the conftest resets them per-test. Safe to raise because the app is behind the tinyauth gate (RR-001). The client also retries 429s with backoff (`withRetry`) as a belt-and-braces measure.
 
 **Consequences:** `POST /api/upload` gained an optional `label` form field (carries the primary file's parenthetical). Multi-file **drop** and multi-select **picker** both route into the importer; a single file still uses the metadata modal, now filename-prefilled. New `bulkImport` module + `#bulk-modal` grid; `parseFilename()` shared with the single-upload prefill. New E2E `TestBulkImport` (3 files → 2 cranes, fill-down, Outrigger chosen as primary, verified server-side). Also fixed a latent v1.2.0 bug found along the way: `Ctrl+F` (find) also triggered the `f` fullscreen shortcut because single-key shortcuts didn't bail on a modifier chord — added `if (mod) return;`. 60 backend + 12 E2E tests, all green. Ships as v1.3.0.
@@ -299,7 +303,8 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Finding:** F-005, F-006 (UX bugs reported after v1.3.0)
 
 **Decisions:**
-1. **Errors during a modal action show inline, not as a toast.** A native `<dialog>` opened with `showModal()` renders in the browser **top layer**, above all normally-positioned content including the fixed toast stack — so a `toast.danger()` fired while the metadata modal was open appeared *behind* the dialog's `::backdrop` and was invisible. Fix: the submit handler now writes to a `#modal-error` element inside the dialog (`showError()`), cleared on open/mode-switch. Success still uses a toast (the modal closes first, so it's visible on the page). Bulk import already shows per-row errors inline, so it was unaffected.
+
+1. **Errors during a modal action show inline, not as a toast.** A native `<dialog>` opened with `showModal()` renders in the browser **top layer**, above all normally-positioned content including the fixed toast stack — so a `toast.danger()` fired while the metadata modal was open appeared _behind_ the dialog's `::backdrop` and was invisible. Fix: the submit handler now writes to a `#modal-error` element inside the dialog (`showError()`), cleared on open/mode-switch. Success still uses a toast (the modal closes first, so it's visible on the page). Bulk import already shows per-row errors inline, so it was unaffected.
 2. **The modal's file-picker box is a real drop target.** It looks droppable (dashed "Click to choose a PDF" zone) but the window-level dropzone refused drops while a modal was open, so nothing happened. Added `dragover`/`drop` on `#file-field` that `stopPropagation()` (so the window handler doesn't also fire) and route the file(s): single → set + prefill; multiple in upload mode → hand off to the bulk importer. The global dropzone now bails entirely while a modal is open (no overlay, no "close the dialog first" toast — which would itself have been buried behind the backdrop).
 
 **Consequences:** New `#modal-error` element + `.modal__error` style; `#file-field.is-dragover` reuses the picker's drag highlight. Two E2E tests added (`test_duplicate_upload_shows_inline_error`, `test_drop_pdf_on_picker_sets_and_prefills`). Also confirms a general rule for this codebase: **anything that must be visible while a native modal dialog is open has to live inside that dialog**, not rely on z-index. 60 backend + 14 E2E, all green. Ships as v1.3.1.
@@ -312,6 +317,7 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Finding:** F-007 (users had to hard-refresh after every deploy to get new JS/CSS)
 
 **Decisions:**
+
 1. **Content-hash cache-busting, not version-string.** `versioned_static('main.js')` appends `?v=<md5[:8]>` of the file's actual bytes. Chosen over `?v=<APP_VERSION>` because a hash busts iff the file changes — correct even if someone forgets to bump a version — and needs zero maintenance. Only the two app-owned assets (`main.js`, `main.css`) are versioned; the vendored pdf.js is stable and left alone. Hashes are computed once and cached in `_ASSET_HASHES`.
 2. **Version flows from the image tag, not a hardcoded constant.** `APP_VERSION = os.environ.get('CRANE_VERSION', 'dev')`; the Dockerfile takes `ARG CRANE_VERSION` and the publish workflow passes `steps.meta.outputs.version` (e.g. `1.3.2` for a tag, `main` for a branch build). So the version indicator always matches the deployed image with no code edit per release. Surfaced in the app-bar, `GET /version`, and `/health`.
 
@@ -327,6 +333,7 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
 **Finding:** F-008 (user feedback on a large real catalogue — 34 Liebherr models)
 
 **Decisions:**
+
 1. **Rebalance the sidebar, don't just widen it.** Grid columns went `1fr 1fr` → `148px 1fr`
    (total 380px → 430px): manufacturer names are short, model names (`LTM1090-4.1`) were
    truncating. Model rows tightened (padding `space-2`→`4px`, margin `2px`→`1px`) so a long
@@ -336,7 +343,7 @@ cache-busting). Each entry records a decision, its reasoning, and consequences.
    purely visual, so it composes with the R-017 virtual-scroll batching untouched. A search
    force-expands all groups (`filter()`), because a match hidden inside a collapsed group
    would be invisible and confusing.
-3. **Cross-field make search.** Previously a make was filtered by its *name* only, so
+3. **Cross-field make search.** Previously a make was filtered by its _name_ only, so
    searching a capacity like `500t` hid every manufacturer (no name contains "500t"). Now
    `renderMakes()` builds `sidebar._makeSearchText[make]` = the lowercased concatenation of
    all that make's cranes' make/type/model/capacity + file labels, and `filter()` keeps a make
@@ -350,8 +357,9 @@ made obvious; found by screenshotting the change rather than trusting the passin
 
 **Consequences:** New `.type-header` button + chevron/count markup and CSS; `_makeSearchText`
 lookup. Two E2E tests (`TestSidebarUX`: collapse toggle, cross-field make search). 64 backend
-+ 17 E2E, all green. Bundled with the v1.3.x documentation refresh (README/CHANGELOG/QA
-rewrite, remediation-docs consolidation). Ships as v1.4.0.
+
+- 17 E2E, all green. Bundled with the v1.3.x documentation refresh (README/CHANGELOG/QA
+  rewrite, remediation-docs consolidation). Ships as v1.4.0.
 
 ---
 
@@ -361,11 +369,12 @@ rewrite, remediation-docs consolidation). Ships as v1.4.0.
 **Finding:** RR-010 (the last open risk — no recovery from `crane.db` loss)
 
 **Decisions:**
+
 1. **In-app scheduler, not host cron.** A daemon thread (`_backup_scheduler`) runs backups on
    an interval, so it "just works" in the container with no external cron to configure —
    matching the app's zero-ceremony philosophy. It sleeps `min(300, interval)` before the
    first run so a restart still snapshots soon (and so tests, which run in seconds, never fire
-   it). `POST /api/backup` is also exposed so a host cron *can* drive it if the operator
+   it). `POST /api/backup` is also exposed so a host cron _can_ drive it if the operator
    prefers (set `CRANE_BACKUP_ENABLED=0`).
 2. **Consistent DB snapshot via SQLite's online-backup API**, not a file copy. Copying a live
    WAL database can capture a torn state; `source.backup(dest)` into a temp file is
@@ -374,9 +383,9 @@ rewrite, remediation-docs consolidation). Ships as v1.4.0.
    included; acceptable for a catalogue snapshot). One `.zip` per backup = trivial restore
    (unzip into the data dir).
 3. **`CRANE_BACKUP_DIR` is independent of the data dir.** Defaults to `<data>/backups` so it
-   works out of the box, but points anywhere — the intended setup is a *separate* mount (e.g.
+   works out of the box, but points anywhere — the intended setup is a _separate_ mount (e.g.
    a TrueNAS share) so a single-disk failure doesn't take the backups too. Documented the
-   corollary: keep the *live* DB on local/block storage, because SQLite WAL locking is
+   corollary: keep the _live_ DB on local/block storage, because SQLite WAL locking is
    unreliable over NFS/SMB — put only the write-once backups (and the plain PDF files, which
    are lock-free) on the network share.
 4. **`CRANE_BACKUP_INCLUDE_UPLOADS` (default on) for DB-only backups.** `CRANE_DB` and
@@ -402,24 +411,26 @@ Ships as v1.5.0.
 **Finding:** F-009 (make the v1.5.0 backups visible/verifiable; a place for instance info)
 
 **Decisions:**
+
 1. **Read-only, not a config editor.** The panel deliberately does NOT let you edit the env
    vars. Most are read once at container start (paths, backup interval captured by the
    scheduler thread) so a UI control would silently do nothing until a restart; and
-   `CRANE_TRUST_PROXY` is a *security* control — a UI toggle for "trust proxy headers" would be
+   `CRANE_TRUST_PROXY` is a _security_ control — a UI toggle for "trust proxy headers" would be
    a footgun. Deployment config belongs in compose (version-controlled, reproducible). The
    panel shows config read-only and says so.
 2. **Backups are the point.** v1.5.0 shipped backups but they were invisible (a lone button +
    a hidden status endpoint) — you couldn't tell if last night's run happened. The Backups card
    surfaces status (schedule, target, last run, DB-only vs full), a "Back up now" button, and a
    list of existing backups each downloadable via `GET /api/backup/download/<name>` (pattern-
-   restricted + `send_from_directory` traversal-safe). Trust comes from being able to *see* it.
+   restricted + `send_from_directory` traversal-safe). Trust comes from being able to _see_ it.
 3. **Consolidated the app-bar.** The standalone database/download button became a gear that
    opens Settings (download lives inside), keeping the app-bar from growing a button per admin
    action. `GET /api/info` backs the read-only instance card (version, counts, paths, limits).
 
 **Consequences:** New `settings` JS module + `#settings-modal`; routes `GET /api/info` and
 `GET /api/backup/download/<name>`. 75 backend + 18 E2E (3 new backend: info + download-by-name
-+ bad-name 404; the E2E backup test became a full settings-flow test). Ships as v1.6.0.
+
+- bad-name 404; the E2E backup test became a full settings-flow test). Ships as v1.6.0.
 
 ## DL-029 — Find & data hygiene: command palette, deep links, autocomplete, merge
 
@@ -427,6 +438,7 @@ Ships as v1.5.0.
 **Finding:** F-010 (retrieval at scale + keeping the catalogue clean as it grows)
 
 **Decisions:**
+
 1. **Client-side command palette, not a search API.** The whole catalogue already lives in
    `state.files` after `loadFileList()`, so the palette (`Ctrl/Cmd+K`) filters in-memory — no
    round-trip, instant results. Fuzzy substring across make/model/type/capacity covers "jump to
@@ -457,22 +469,23 @@ jump+capacity, deep-link-on-load, merge flow). Ships as v1.7.0.
 ## DL-030 — Backup restore: reversible, validate-before-swap, atomic on one filesystem
 
 **Date:** 2026-07-08
-**Finding:** F-011 (v1.5.0 shipped backups but no way to *use* one — restore meant a manual
+**Finding:** F-011 (v1.5.0 shipped backups but no way to _use_ one — restore meant a manual
 container-stop + unzip + file swap; an untested/unusable backup is a false safety net)
 
 **Decisions:**
-1. **Validate before touching live data.** The archive is fully vetted *first* — arcnames are
+
+1. **Validate before touching live data.** The archive is fully vetted _first_ — arcnames are
    rejected if absolute or containing `..` (traversal), uncompressed size is capped
    (`CRANE_MAX_RESTORE_MB`, default 4096) against zip bombs, and the extracted DB must open as
    SQLite with the expected `cranes`/`files` tables. A bad upload returns 400 with the live
    catalogue **untouched** (test: `test_restore_zip_without_db_rejected`).
 2. **Every restore is reversible.** Before swapping, a labelled `…-prerestore.zip` safety backup
-   of the *current* state is written. So the single most destructive action in the app can always
+   of the _current_ state is written. So the single most destructive action in the app can always
    be undone — restore the pre-restore backup. This is what makes exposing restore in the UI
    acceptable.
 3. **Atomic-as-possible swap, DB last.** Under `metadata_lock()` (serialised with every other
    mutation), uploads are swapped first via `os.rename`, then the DB via `os.replace` — the DB is
-   the source of truth, so it flips last and atomically. The staging dir is created *beside*
+   the source of truth, so it flips last and atomically. The staging dir is created _beside_
    `DB_FILE` so the replace is same-filesystem (not a cross-device `EXDEV`). Stale `-wal`/`-shm`
    sidecars are deleted so SQLite can't replay an old WAL onto the new DB.
 4. **Two input modes, upload is trusted least.** Restore-by-name (`{name}`) only accepts an
@@ -481,7 +494,7 @@ container-stop + unzip + file swap; an untested/unusable backup is a false safet
    it's subject to the global `MAX_CONTENT_LENGTH`, with the documented escape hatch of dropping a
    huge zip into `BACKUP_DIR` and restoring by name. Both inherit CSRF + the tinyauth gate + rate
    limiting; no new auth surface.
-5. **Audit into the restored DB.** The `restore` event is logged *after* the swap so it lands in
+5. **Audit into the restored DB.** The `restore` event is logged _after_ the swap so it lands in
    the now-current database — the restored catalogue carries a record that it was restored, and
    from what. (Logging before would be overwritten by the swap.)
 
@@ -501,6 +514,7 @@ living remediation programme (`backlog.md`, `master-plan.md`, `progress-report.m
 log and the risk register), 38 backlog items across P1–P8.
 
 **Decisions:**
+
 1. **Sequence by P-band, but pull security/dependency CI guardrails forward.** The audit judged
    these highest-leverage (nothing automatically caught a bad dependency). Vindicated instantly:
    adding `pip-audit` surfaced **Flask CVE-2026-27205**, fixed same cycle (3.1.1→3.1.3).
@@ -508,7 +522,7 @@ log and the risk register), 38 backlog items across P1–P8.
    Impact analysis showed a naive FK breaks the crane-rename path (`UPDATE cranes SET id=…`
    while `files.crane_id` still points at the old id) and existing DBs need a table rebuild to
    acquire the constraint. It is reclassified `IN_ANALYSIS`, now dependent on the connection-layer
-   refactor (REM-MAINT-03) + `ON UPDATE/DELETE CASCADE` + a migration. This deferral *is* the
+   refactor (REM-MAINT-03) + `ON UPDATE/DELETE CASCADE` + a migration. This deferral _is_ the
    programme working — analyse impact before acting.
 3. **Split runtime vs dev dependencies.** `pip-audit` prompted noticing that pytest/playwright
    were being installed into the runtime image via `requirements.txt`. Now `requirements.txt`

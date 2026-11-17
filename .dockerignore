@@ -16,3 +16,4 @@ metadata.json.lock
 metadata.json.tmp
 metadata.json.migrated
 *.pyc
+node_modules
