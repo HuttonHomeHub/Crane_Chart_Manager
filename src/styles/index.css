@@ -855,6 +855,113 @@ body {
   color: var(--fg-secondary);
 }
 
+/* ---- Keys, palette and shortcuts -------------------------------------- */
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-1);
+  min-height: 20px;
+  border: 1px solid var(--border-default);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface-raised);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+.kbd--on-accent {
+  margin-left: var(--space-1);
+  border-color: color-mix(in srgb, var(--accent-fg) 40%, transparent);
+  background: transparent;
+  color: var(--accent-fg);
+}
+
+.app-search__hint {
+  cursor: pointer;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.palette__input {
+  width: 100%;
+  height: var(--control-h-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--fg-primary);
+  font: inherit;
+}
+
+.palette__input:focus {
+  outline: 0;
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.palette__results {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.palette__result {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.palette__result.is-active {
+  background: var(--accent-muted-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.palette__result-title {
+  font-weight: var(--weight-medium);
+  color: var(--fg-primary);
+}
+
+.palette__result-meta,
+.palette__empty,
+.palette__hint {
+  font-size: var(--text-sm);
+  color: var(--fg-secondary);
+}
+
+.palette__empty {
+  padding: var(--space-3);
+}
+
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.shortcuts__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.shortcuts__row dd {
+  display: flex;
+  gap: var(--space-1);
+}
+
 /* ---- Settings: merge ----------------------------------------------------- */
 
 .merge {
@@ -899,6 +1006,11 @@ body {
 }
 
 @media (max-width: 640px) {
+  .hhh-app-bar__actions .kbd,
+  .app-search__hint {
+    display: none;
+  }
+
   .viewer__well {
     padding: var(--space-3) var(--space-3) calc(var(--space-12) + 20px);
   }
