@@ -135,7 +135,10 @@ export function Sidebar({
     <nav id="sidebar" className={`sidebar${open ? ' is-open' : ''}`} aria-label="Documents">
       <section className="sidebar__panel">
         <header className="sidebar__heading">
-          Manufacturers <span id="makes-count">{skeleton ? '' : makes.length}</span>
+          <span className="sidebar__title">Manufacturers</span>
+          <span id="makes-count" className="sidebar__count">
+            {skeleton ? '' : makes.length}
+          </span>
         </header>
         <div id="make-list" className="sidebar__list">
           {skeleton ? <Skeleton rows={8} /> : null}
@@ -162,7 +165,10 @@ export function Sidebar({
       </section>
       <section className="sidebar__panel">
         <header className="sidebar__heading">
-          Models <span id="models-count">{skeleton ? '' : (group?.cranes.length ?? 0)}</span>
+          <span className="sidebar__title">Models</span>
+          <span id="models-count" className="sidebar__count">
+            {skeleton ? '' : (group?.cranes.length ?? 0)}
+          </span>
         </header>
         <div id="model-list" className="sidebar__list" ref={listRef}>
           {skeleton ? <Skeleton rows={5} /> : null}

@@ -12,7 +12,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.app.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.app.json && tsc -p tsconfig.e2e.json",
     "vendor:check": "node vendor/hhh-platform/scripts/vendor.ts --check",
     "check": "npm run vendor:check && npm run typecheck && npm run lint && npm run format:check && npm run test:coverage && npm run build && npm audit --audit-level=high"
   },
@@ -38,6 +38,7 @@
     "@eslint/js": "9.39.5",
     "@hhh/config": "file:vendor/hhh-platform/packages/config",
     "@hhh/ui": "file:vendor/hhh-platform/packages/ui",
+    "@playwright/test": "1.65.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.10",

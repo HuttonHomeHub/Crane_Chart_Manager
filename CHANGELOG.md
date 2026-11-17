@@ -46,6 +46,12 @@ that section as the GitHub Release notes.
   jumps to a crane by any word of its details or file labels, or lists everything at least a
   capacity (`>=150`, `≥150`, `150t+`), smallest first. Ctrl/⌘+U uploads, and `?` or the
   keyboard button lists every shortcut, now including find (Ctrl/⌘+F or `/`).
+- **Rebuild: end-to-end tests and screenshots.** 27 Playwright tests drive the built app and the
+  real PDF.js in a browser (1.x's scenarios, plus a check that a PDF renders with no console
+  errors or CSP problems), in CI and through `scripts/check-node.sh`. Screenshots of both themes
+  on desktop and phone are in `docs/screenshots/`. The first look in a browser found and fixed:
+  the find bar covering the details bar, the toolbar wrapping on phones and showing above the
+  open drawer, and the manufacturers heading overlapping its count.
 
 ## v1.9.0 — shared container standard: unprefixed settings, all state in /config
 
