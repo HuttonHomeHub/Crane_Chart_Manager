@@ -56,14 +56,14 @@ names everywhere (`PUID`, `PGID`, `TZ`, `TRUST_PROXY`, `LOG_LEVEL`). A `docker-c
 services:
   crane-charts:
     container_name: crane-charts
-    image: ghcr.io/huttonhomehub/crane-charts:latest   # or pin a version, e.g. :1.9.0
+    image: ghcr.io/huttonhomehub/crane-charts:latest # or pin a version, e.g. :1.9.0
     ports:
       - 5000:5000
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Europe/London
-      - TRUST_PROXY=1          # proxy hops in front (1 = nginx); 0 = no proxy
+      - TRUST_PROXY=1 # proxy hops in front (1 = nginx); 0 = no proxy
     volumes:
       - /apps/crane-charts/config:/config
     restart: unless-stopped
@@ -94,31 +94,31 @@ has the full nginx snippet.
 
 Shared with every HuttonHomeHub app (same name and meaning everywhere):
 
-| Var | Default | Purpose |
-|-----|---------|---------|
-| `PUID` / `PGID` | `1000` | User and group the app runs as; data directories are chowned to them |
-| `TZ` | UTC | Time zone for logs and timestamps, e.g. `Europe/London` |
-| `TRUST_PROXY` | `0` | Number of reverse-proxy hops in front whose `X-Forwarded-*` headers are trusted. `0` = none. Never set it higher than the real number of proxies |
-| `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug` (also `trace`, `silent`) |
-| `DATA_DIR` | `/config` in the image | Where all state lives; the next two default inside it |
-| `DB_PATH` | `$DATA_DIR/crane.db` | SQLite database file |
-| `UPLOADS_DIR` | `$DATA_DIR/uploads` | PDF storage directory |
-| `APP_VERSION` | `dev` | Release version, set from the image tag at build time |
+| Var             | Default                | Purpose                                                                                                                                          |
+| --------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PUID` / `PGID` | `1000`                 | User and group the app runs as; data directories are chowned to them                                                                             |
+| `TZ`            | UTC                    | Time zone for logs and timestamps, e.g. `Europe/London`                                                                                          |
+| `TRUST_PROXY`   | `0`                    | Number of reverse-proxy hops in front whose `X-Forwarded-*` headers are trusted. `0` = none. Never set it higher than the real number of proxies |
+| `LOG_LEVEL`     | `info`                 | `fatal`, `error`, `warn`, `info`, `debug` (also `trace`, `silent`)                                                                               |
+| `DATA_DIR`      | `/config` in the image | Where all state lives; the next two default inside it                                                                                            |
+| `DB_PATH`       | `$DATA_DIR/crane.db`   | SQLite database file                                                                                                                             |
+| `UPLOADS_DIR`   | `$DATA_DIR/uploads`    | PDF storage directory                                                                                                                            |
+| `APP_VERSION`   | `dev`                  | Release version, set from the image tag at build time                                                                                            |
 
 Crane Charts only:
 
-| Var | Default | Purpose |
-|-----|---------|---------|
-| `MAX_UPLOAD_MB` | `500` | Max upload size (MB) |
-| `MAX_FIELD_LEN` | `64` | Max characters per metadata field |
-| `UPLOAD_RATE` / `WRITE_RATE` | `60 per minute` | Flask-Limiter limits for upload / other mutations |
-| `BACKUP_DIR` | `<db dir>/backups` | Where periodic backups are written |
-| `BACKUP_INTERVAL_HOURS` | `24` | Backup interval |
-| `BACKUP_KEEP` | `7` | How many backups to retain |
-| `BACKUP_ENABLED` | `1` | Set `0` to disable the backup scheduler |
-| `BACKUP_INCLUDE_UPLOADS` | `1` | Set `0` for DB-only backups (when PDFs live on snapshotting storage) |
-| `MAX_RESTORE_MB` | `4096` | Max uncompressed size of a restore archive (zip-bomb guard) |
-| `DEBUG` | `0` | `1` enables the Werkzeug debugger for `python app.py` only (never in production) |
+| Var                          | Default            | Purpose                                                                          |
+| ---------------------------- | ------------------ | -------------------------------------------------------------------------------- |
+| `MAX_UPLOAD_MB`              | `500`              | Max upload size (MB)                                                             |
+| `MAX_FIELD_LEN`              | `64`               | Max characters per metadata field                                                |
+| `UPLOAD_RATE` / `WRITE_RATE` | `60 per minute`    | Flask-Limiter limits for upload / other mutations                                |
+| `BACKUP_DIR`                 | `<db dir>/backups` | Where periodic backups are written                                               |
+| `BACKUP_INTERVAL_HOURS`      | `24`               | Backup interval                                                                  |
+| `BACKUP_KEEP`                | `7`                | How many backups to retain                                                       |
+| `BACKUP_ENABLED`             | `1`                | Set `0` to disable the backup scheduler                                          |
+| `BACKUP_INCLUDE_UPLOADS`     | `1`                | Set `0` for DB-only backups (when PDFs live on snapshotting storage)             |
+| `MAX_RESTORE_MB`             | `4096`             | Max uncompressed size of a restore archive (zip-bomb guard)                      |
+| `DEBUG`                      | `0`                | `1` enables the Werkzeug debugger for `python app.py` only (never in production) |
 
 The old `CRANE_`-prefixed names (`CRANE_TRUST_PROXY`, `CRANE_DB`, `CRANE_UPLOAD_DIR`,
 `CRANE_BACKUP_KEEP`, …) still work. Each one in use logs a one-line "deprecated" warning at
@@ -138,24 +138,24 @@ For real safety, point `BACKUP_DIR` at a **separate mount** (e.g. a NAS share) s
 single-disk failure doesn't take the backups with it:
 
 ```yaml
-    environment:
-      - BACKUP_DIR=/backups
-    volumes:
-      - /apps/crane-charts/config:/config
-      - /mnt/truenas/crane-backups:/backups
+environment:
+  - BACKUP_DIR=/backups
+volumes:
+  - /apps/crane-charts/config:/config
+  - /mnt/truenas/crane-backups:/backups
 ```
 
-Note: keep the *live* `crane.db` on local/block storage — SQLite's WAL locking is unreliable
+Note: keep the _live_ `crane.db` on local/block storage — SQLite's WAL locking is unreliable
 over NFS/SMB. The PDFs, being plain write-once files, are safe on a network share, so a good
 split is **DB local, `UPLOADS_DIR` on a NAS**:
 
 ```yaml
-    environment:
-      - UPLOADS_DIR=/pdfs                  # PDFs → NAS (the database stays in /config)
-      - BACKUP_INCLUDE_UPLOADS=0           # NAS/ZFS already snapshots the PDFs
-    volumes:
-      - /apps/crane-charts/config:/config
-      - /mnt/truenas/crane-pdfs:/pdfs
+environment:
+  - UPLOADS_DIR=/pdfs # PDFs → NAS (the database stays in /config)
+  - BACKUP_INCLUDE_UPLOADS=0 # NAS/ZFS already snapshots the PDFs
+volumes:
+  - /apps/crane-charts/config:/config
+  - /mnt/truenas/crane-pdfs:/pdfs
 ```
 
 With PDFs on storage that snapshots itself (e.g. TrueNAS/ZFS), set
@@ -192,19 +192,19 @@ All `/api/*` endpoints return JSON; errors are uniformly `{ "error": "…" }`. M
 (`POST`/`PUT`/`PATCH`/`DELETE`) require the `X-CSRF-Token` header matching the `crane_csrf`
 cookie.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/pdfs?after=<id>&limit=<n>` | List cranes (paginated); each item has `files[]` + primary `url` |
-| `POST` | `/api/upload` | Create a crane from its first PDF (+ optional `label`) |
-| `POST` | `/api/cranes/<id>/files` | Attach a supplementary PDF (+ optional `label`) |
-| `PUT` | `/api/cranes/<id>/primary` | Set the main file (`{file_id}`) |
-| `PATCH` | `/api/cranes/<id>/files/<file_id>` | Rename a file's label |
-| `DELETE` | `/api/cranes/<id>/files/<file_id>` | Delete one file (last file → deletes the crane) |
-| `PUT` | `/api/metadata/<id>` | Edit crane make/type/model/capacity |
-| `DELETE` | `/api/delete/<id>` | Delete a whole crane |
-| `GET` | `/api/export` | Download the catalogue as JSON (backup) |
-| `GET` | `/uploads/<id>/<file>` | Serve a stored PDF |
-| `GET` | `/health`, `/version` | Liveness + running version |
+| Method   | Path                               | Purpose                                                          |
+| -------- | ---------------------------------- | ---------------------------------------------------------------- |
+| `GET`    | `/api/pdfs?after=<id>&limit=<n>`   | List cranes (paginated); each item has `files[]` + primary `url` |
+| `POST`   | `/api/upload`                      | Create a crane from its first PDF (+ optional `label`)           |
+| `POST`   | `/api/cranes/<id>/files`           | Attach a supplementary PDF (+ optional `label`)                  |
+| `PUT`    | `/api/cranes/<id>/primary`         | Set the main file (`{file_id}`)                                  |
+| `PATCH`  | `/api/cranes/<id>/files/<file_id>` | Rename a file's label                                            |
+| `DELETE` | `/api/cranes/<id>/files/<file_id>` | Delete one file (last file → deletes the crane)                  |
+| `PUT`    | `/api/metadata/<id>`               | Edit crane make/type/model/capacity                              |
+| `DELETE` | `/api/delete/<id>`                 | Delete a whole crane                                             |
+| `GET`    | `/api/export`                      | Download the catalogue as JSON (backup)                          |
+| `GET`    | `/uploads/<id>/<file>`             | Serve a stored PDF                                               |
+| `GET`    | `/health`, `/version`              | Liveness + running version                                       |
 
 ## History
 

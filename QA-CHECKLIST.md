@@ -10,6 +10,7 @@ the filename convention).
 ---
 
 ## 1 · First paint
+
 - [ ] Page loads with the persisted theme (dark by default). No flash of wrong theme.
 - [ ] Brand reads `Crane Charts` with the amber crane icon and a **version badge** (e.g. `dev`).
 - [ ] DevTools → Network: `main.js`/`main.css` load with a `?v=<hash>` query; `pdf.min.mjs`
@@ -18,10 +19,12 @@ the filename convention).
 - [ ] DevTools → Application → Cookies: `crane_csrf` exists, `SameSite=Strict`.
 
 ## 2 · Theme toggle
+
 - [ ] Sun/moon icon swaps theme smoothly (bg + text transition together). Reload — persists.
 - [ ] On Windows/Linux the kbd chips read `Ctrl+K` / `Ctrl+U` at first paint (no Mac-glyph flash).
 
 ## 3 · Sidebar
+
 - [ ] Hover/click a make — amber active state; models populate, grouped by type.
 - [ ] A crane with more than one file shows a small **file-count badge** on its row.
 - [ ] Hover a model row — pencil + trash actions fade in. Truncated names show a tooltip.
@@ -30,10 +33,12 @@ the filename convention).
       still finds rows that haven't scrolled into view.
 
 ## 4 · Search (sidebar)
+
 - [ ] Typing filters both columns live; no-match shows the `No matches for "…"` banner;
       clearing restores. `⌘/Ctrl+K` focuses the search input.
 
 ## 5 · Upload — single file
+
 - [ ] Click `Upload` → modal opens, focus on the file picker.
 - [ ] **Drag a PDF onto the "Click to choose a PDF" box** — it highlights and accepts the
       drop; make/model prefill from the filename.
@@ -43,6 +48,7 @@ the filename convention).
       dialog** ("…already exists"); modal stays open (error is NOT a hidden toast behind it).
 
 ## 6 · Upload — drag & drop
+
 - [ ] Drag one PDF over the window (nothing open) → dropzone overlay → drops into the upload
       modal, prefilled from the filename.
 - [ ] With a crane open, drop one PDF → the modal offers to **add it to that crane** (titled
@@ -50,6 +56,7 @@ the filename convention).
 - [ ] Drag a non-PDF → warning toast `PDF only`.
 
 ## 7 · Bulk import
+
 - [ ] Drop **2+ PDFs** at once (or multi-select in the upload picker) → the bulk grid opens.
 - [ ] Header reads `N files → M cranes`; files sharing `Manufacturer Model` group into one
       row (e.g. the two `Liebherr LTM1100 (...)` files → one crane, two files).
@@ -61,6 +68,7 @@ the filename convention).
 - [ ] Leave a row's Type/Capacity blank and Import → that row is flagged; fix and `Retry`.
 
 ## 8 · Multi-file (file strip)
+
 - [ ] Open a crane with 2+ files → the strip shows a chip per file; the primary has the star.
 - [ ] Click a chip → that file renders in the viewer.
 - [ ] Click the star on a non-primary chip → it becomes the main file (opens by default next time).
@@ -70,6 +78,7 @@ the filename convention).
       dialog warns it removes the whole crane.
 
 ## 9 · In-PDF find
+
 - [ ] `Ctrl/Cmd+F` (or `/`, or the toolbar magnifier) opens the find bar; focus in the input.
 - [ ] Type a term present in the open chart → count shows `X/Y`; matches highlight in amber;
       the current one is outlined and scrolled into view.
@@ -78,12 +87,14 @@ the filename convention).
 - [ ] Switch to a different file in the strip while find is open → it re-runs on the new doc.
 
 ## 10 · Edit & delete crane
+
 - [ ] Pencil on a row → edit modal, four fields prefilled. Change Capacity, save → `Saved`.
 - [ ] Edit a field that changes the slug → `Saved & renamed`; the crane's directory renames and
       the viewer reloads with the new URLs. Colliding with an existing crane → inline error.
 - [ ] Trash on a row → confirm dialog; confirm → toast; focus moves to a sensible sibling row.
 
 ## 11 · Viewer controls
+
 - [ ] `←`/`→` page (disable at ends); page-input + Enter jumps; `+`/`−` zoom in 25% steps.
 - [ ] Zoom readout cycles `fit-page → fit-width → 100%`. `F` fullscreens the whole page;
       `Esc`/`F` exits. **`Ctrl+F` opens find and does NOT also toggle fullscreen.**
@@ -91,6 +102,7 @@ the filename convention).
 - [ ] Resize window → PDF re-fits after a brief debounce.
 
 ## 12 · Keyboard, modals, mobile, a11y
+
 - [ ] `?` opens shortcuts (even from inside a modal). Inside a modal, viewer keys don't leak through.
 - [ ] `Esc` closes the topmost modal, then the dropzone, then fullscreen.
 - [ ] Modal backdrop click closes; mousedown-inside-drag-out does not close.
@@ -99,6 +111,7 @@ the filename convention).
 - [ ] Tab order is logical; focus rings visible; reduced-motion disables slide animations.
 
 ## 13 · Persistence & deploy
+
 - [ ] Hard-refresh — cranes/files survive, metadata intact, theme applied.
 - [ ] Stop/restart the server, reload — same.
 - [ ] Corrupt `crane.db` (write garbage bytes), reload `/api/pdfs` → empty catalogue, no 500;
@@ -107,6 +120,7 @@ the filename convention).
       reload serves the new file (the `?v=` hash changed) — no hard-refresh needed.
 
 ## 14 · Failure modes
+
 - [ ] Disable JavaScript → reload → centered `Crane Charts requires JavaScript` message.
 - [ ] Block `pdf.min.mjs` → reload → `PDF viewer failed to load` empty state.
 - [ ] Kill the network mid-upload → `Network error during upload`; modal stays open.
@@ -117,5 +131,5 @@ the filename convention).
 ## Sign-off
 
 | Date | Operator | Version | Notes |
-|------|----------|---------|-------|
+| ---- | -------- | ------- | ----- |
 |      |          |         |       |

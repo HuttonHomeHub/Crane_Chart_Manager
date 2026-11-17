@@ -15,14 +15,14 @@ accepted risk (with conditions) or superseded (with the replacing item named).
 ## Prioritisation policy
 
 Primary ordering is the audit's P1→P8 bands (data-loss → authn → security → dependency → ops →
-testing → maintainability → scalability). **Within** a band, work is selected by *value ÷ effort*
+testing → maintainability → scalability). **Within** a band, work is selected by _value ÷ effort_
 and by dependency readiness. Two deliberate deviations from strict band order, both justified:
 
 1. **Security/dependency quick wins were pulled forward in Cycle 1.** The audit's own conclusion
    was that CI security guardrails are the single highest-leverage work (nothing automatically
    caught a vulnerable dependency). Cycle 1 proved this immediately — the new scanner found a live
    Flask CVE.
-2. **P1 data-integrity item REM-DATA-01 (foreign keys) was *not* done first**, despite its band,
+2. **P1 data-integrity item REM-DATA-01 (foreign keys) was _not_ done first**, despite its band,
    because impact analysis (below) revealed it depends on other work. Doing it naively would break
    the crane-rename path. This is exactly the reordering the programme mandates.
 
@@ -41,18 +41,18 @@ dependent items reviewed. It passes to `CLOSED` on merge to `main`.
 
 ## Impact-analysis ledger (dependencies discovered by analysis, not just listed in the audit)
 
-| When | Change considered | Impact discovered | Backlog effect |
-|------|-------------------|-------------------|----------------|
+| When    | Change considered                   | Impact discovered                                                                                                                     | Backlog effect                                                                                                                              |
+| ------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Cycle 1 | Enable FK constraints (REM-DATA-01) | `UPDATE cranes SET id=…` in the rename/merge paths would violate a naive FK; existing DBs need a table rebuild to gain the constraint | DATA-01 → `IN_ANALYSIS`; now depends on REM-MAINT-03 (connection helper) + `ON UPDATE/DELETE CASCADE` + migration. Deferred out of Cycle 1. |
-| Cycle 1 | Add `pip-audit` to CI (REM-SEC-02a) | Immediately surfaced Flask CVE-2026-27205 | New item **SEC-DEP-01** created and fixed same cycle |
-| Cycle 1 | Move dev tools to CI | They were being installed into the runtime image via `requirements.txt` | New item **REM-SEC-02e** (split runtime/dev deps) — done; smaller image |
-| Cycle 1 | Expand ruff ruleset | I/B/UP + `ruff format` would rewrite the whole tree (noisy) incl. a real `raise…from` fix | New item **REM-MAINT-06**; kept enforced gate on default rules only |
-| Cycle 1 | Coverage gate (REM-OPS-01c) | Makes standalone T3 redundant | **REM-TEST-03 → SUPERSEDED** |
+| Cycle 1 | Add `pip-audit` to CI (REM-SEC-02a) | Immediately surfaced Flask CVE-2026-27205                                                                                             | New item **SEC-DEP-01** created and fixed same cycle                                                                                        |
+| Cycle 1 | Move dev tools to CI                | They were being installed into the runtime image via `requirements.txt`                                                               | New item **REM-SEC-02e** (split runtime/dev deps) — done; smaller image                                                                     |
+| Cycle 1 | Expand ruff ruleset                 | I/B/UP + `ruff format` would rewrite the whole tree (noisy) incl. a real `raise…from` fix                                             | New item **REM-MAINT-06**; kept enforced gate on default rules only                                                                         |
+| Cycle 1 | Coverage gate (REM-OPS-01c)         | Makes standalone T3 redundant                                                                                                         | **REM-TEST-03 → SUPERSEDED**                                                                                                                |
 
 ## Sequenced roadmap (tranches)
 
 - **Tranche 1 — Security/Ops quick wins (Cycle 1, DONE):** SEC-DEP-01, REM-SEC-02a/b/c/e,
-  REM-SEC-03, REM-SEC-04, REM-OPS-01a/c, REM-OPS-02, REM-OPS-03, REM-OPS-04. *All VALIDATED.*
+  REM-SEC-03, REM-SEC-04, REM-OPS-01a/c, REM-OPS-02, REM-OPS-03, REM-OPS-04. _All VALIDATED._
 - **Tranche 2 — Ops hardening finish:** REM-OPS-01d (bandit), REM-OPS-01e (trivy), REM-SEC-02d
   (hash-pin). Low-risk CI-only.
 - **Tranche 3 — Backend integrity foundation:** REM-MAINT-03 (`db.py`) → unlocks REM-DATA-01
@@ -70,14 +70,14 @@ dependent items reviewed. It passes to `CLOSED` on merge to `main`.
 
 ## Remaining-effort estimate (rough, engineer-days)
 
-| Tranche | Items | Est. |
-|---------|-------|------|
-| 1 (done) | 12 | — |
-| 2 | 3 | 0.5 |
-| 3 | 4 | 3–4 |
-| 4 | 2 | 1.5–2 |
-| 5 | 5 | 4–6 |
-| 6 | 5 | 2 |
+| Tranche             | Items  | Est.          |
+| ------------------- | ------ | ------------- |
+| 1 (done)            | 12     | —             |
+| 2                   | 3      | 0.5           |
+| 3                   | 4      | 3–4           |
+| 4                   | 2      | 1.5–2         |
+| 5                   | 5      | 4–6           |
+| 6                   | 5      | 2             |
 | **Remaining total** | **19** | **≈ 11–14 d** |
 
 Accepted-risk items carry 0 implementation effort (documentation only, already done).
