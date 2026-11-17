@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import express, { type Express } from 'express';
 import { createBaseApp, finishApp } from '@hhh/server';
 import { config } from './config.ts';
 import { logger } from './logger.ts';
 import { pingDb } from './db.ts';
-import { uploadsDir } from './paths.ts';
+import { distDir, uploadsDir } from './paths.ts';
 import { backupsRouter, infoRouter } from './routes/backups.ts';
 import { cranesRouter } from './routes/cranes.ts';
 
@@ -29,7 +31,15 @@ export function createApp(): Express {
     res.status(404).json({ error: 'File not found' });
   });
 
-  // The React front end arrives in phase 4.3 (the 1.x page is still what ships).
+  // The React front end, when built: its files, and index.html for any other page
+  // address (the app reads deep links from the hash). /api stays JSON.
+  if (existsSync(join(distDir, 'index.html'))) {
+    app.use(express.static(distDir, { index: false }));
+    app.get('/{*path}', (req, res, next) => {
+      if (req.path.startsWith('/api/')) next();
+      else res.sendFile(join(distDir, 'index.html'));
+    });
+  }
 
   finishApp(app, logger);
   return app;

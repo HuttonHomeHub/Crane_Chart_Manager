@@ -17,6 +17,8 @@ export const dataDir = resolve(paths.dataDir);
 export const dbPath = resolve(paths.dbPath);
 export const uploadsDir = resolve(paths.uploadsDir);
 export const backupDir = resolve(config.backup.dir ?? join(dirname(dbPath), 'backups'));
+// The built front end (npm run build).
+export const distDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 // Numbered SQL migrations (NNN-name.sql), run by the shared kit.
 export const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 

@@ -1,3 +1,4 @@
+import react from '@vitejs/plugin-react';
 import { defineConfig, mergeConfig } from 'vitest/config';
 import { hhhVitest } from '@hhh/config/vitest';
 
@@ -5,7 +6,12 @@ import { hhhVitest } from '@hhh/config/vitest';
 export default mergeConfig(
   hhhVitest({
     include: ['tests/**/*.test.{ts,tsx}'],
-    coverageInclude: ['server/**/*.ts', 'shared/**/*.ts'],
+    coverageInclude: ['server/**/*.ts', 'shared/**/*.ts', 'src/**/*.{ts,tsx}'],
   }),
-  defineConfig({})
+  defineConfig({
+    // React plugin so component tests can render JSX. Server and logic tests run in
+    // Node; component tests opt into jsdom with a `// @vitest-environment jsdom` docblock.
+    plugins: [react()],
+    test: { coverage: { exclude: ['src/main.tsx'] } },
+  })
 );
