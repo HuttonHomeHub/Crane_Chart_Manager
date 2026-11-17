@@ -389,6 +389,45 @@ describe('uploading and editing', () => {
   });
 });
 
+describe('shortcuts', () => {
+  it('opens the palette with Ctrl+K or its hint, and jumps to the chosen crane', async () => {
+    api([lr, ltm, ac]);
+    renderApp();
+    await screen.findByText('LR1300');
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const input = screen.getByRole('combobox', { name: 'Jump to a crane' });
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true }); // ignored over a dialog
+    fireEvent.change(input, { target: { value: '>=400' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(window.location.hash).toBe(`#crane/${ac.id}`));
+    expect(await screen.findByText('AC 500', { selector: '#info-model' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Tadano/ })).toHaveClass('is-active');
+    expect(screen.queryByRole('dialog', { name: 'Find a crane' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Ctrl+K' }));
+    expect(screen.getByRole('dialog', { name: 'Find a crane' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  });
+
+  it('opens upload with Ctrl+U and the shortcuts with ?, but not while typing', async () => {
+    api([lr]);
+    renderApp();
+    await screen.findByText('LR1300');
+    fireEvent.keyDown(window, { key: 'u', ctrlKey: true });
+    expect(screen.getByRole('dialog', { name: 'Upload crane specification' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filter the sidebar list' }), {
+      key: '?',
+    });
+    expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).toBeNull();
+    fireEvent.keyDown(window, { key: '?' });
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }));
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'x' });
+  });
+});
+
 describe('neighbourOf', () => {
   it('prefers the next crane in the same type, then the previous, then the make’s', () => {
     const a = crane({ make: 'M', type: 'T', model: 'A' });

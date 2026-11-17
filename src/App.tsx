@@ -1,14 +1,16 @@
 import { Search, Upload } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppBar, Button, ConfirmDialog, useToast } from '@hhh/ui';
 import type { Crane } from '../shared/api.ts';
 import { BulkImport } from './components/BulkImport.tsx';
+import { CommandPalette } from './components/CommandPalette.tsx';
 import { CraneIcon } from './components/CraneIcon.tsx';
 import { DropZone } from './components/DropZone.tsx';
 import { EmptyState } from './components/EmptyState.tsx';
 import { InfoBar } from './components/InfoBar.tsx';
 import { MetadataDialog, type MetaRequest, type MetaResult } from './components/MetadataDialog.tsx';
 import { SettingsDialog } from './components/SettingsDialog.tsx';
+import { ShortcutsDialog } from './components/ShortcutsDialog.tsx';
 import { Viewer } from './components/Viewer.tsx';
 import { Sidebar, makeForQuery } from './components/Sidebar.tsx';
 import { useCatalogue } from './hooks/useCatalogue.ts';
@@ -18,6 +20,7 @@ import { useAppVersion } from './hooks/useSettings.ts';
 import { useHashCrane } from './hooks/useHashCrane.ts';
 import { groupCatalogue, isPdf } from './lib/catalogue.ts';
 import { plural } from './lib/format.ts';
+import { isMac, modKey } from './lib/keys.ts';
 
 /** Below this width the sidebar is a drawer (1.x's --bp-tablet). */
 export const DRAWER_QUERY = '(max-width: 900px)';
@@ -53,6 +56,9 @@ export function App() {
   // The upload/edit/add-file dialog (a new key each time, so it opens fresh) and bulk import.
   const [meta, setMeta] = useState<{ key: number; request: MetaRequest } | null>(null);
   const [bulk, setBulk] = useState<{ key: number; files: File[] } | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
+  const [mac] = useState(isMac);
 
   const narrow = useMediaQuery(DRAWER_QUERY);
   const drawerOpen = narrow && drawer;
@@ -130,6 +136,34 @@ export function App() {
     void reload();
   };
 
+  // Ctrl/⌘+K the palette, Ctrl/⌘+U upload (from anywhere, not over a dialog); "?" the
+  // shortcuts list (not while typing). The viewer has its own keys for the open PDF.
+  const keyActions = useRef({
+    palette: () => setPalette(true),
+    upload: () => startMeta({ mode: 'upload' }),
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (document.querySelector('dialog[open]')) return;
+      const mod = mac ? event.metaKey : event.ctrlKey;
+      const key = event.key.toLowerCase();
+      if (mod && key === 'k') {
+        event.preventDefault();
+        keyActions.current.palette();
+      } else if (mod && key === 'u') {
+        event.preventDefault();
+        keyActions.current.upload();
+      } else if (event.key === '?' && !mod) {
+        const t = event.target as HTMLElement | null;
+        if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.isContentEditable) return;
+        event.preventDefault();
+        setShortcuts(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mac]);
+
   const deleteName = pendingDelete
     ? `${pendingDelete.model || pendingDelete.name}${pendingDelete.capacity ? ` (${pendingDelete.capacity})` : ''}`
     : '';
@@ -143,14 +177,19 @@ export function App() {
         menuOpen={drawerOpen}
         {...(narrow ? { onMenu: () => setDrawer((d) => !d) } : {})}
         onSettings={() => setSettingsOpen(true)}
+        onShortcuts={() => setShortcuts(true)}
         actions={
           <Button
             id="upload-trigger"
+            aria-keyshortcuts={mac ? 'Meta+U' : 'Control+U'}
             variant="primary"
             icon={<Upload size={16} aria-hidden />}
             onClick={() => startMeta({ mode: 'upload' })}
           >
-            Upload
+            Upload{' '}
+            <kbd className="kbd kbd--on-accent" aria-hidden>
+              {modKey('U', mac)}
+            </kbd>
           </Button>
         }
         search={
@@ -172,6 +211,16 @@ export function App() {
                 if (e.key === 'Escape') e.currentTarget.blur();
               }}
             />
+            <button
+              type="button"
+              id="palette-hint"
+              aria-keyshortcuts={mac ? 'Meta+K' : 'Control+K'}
+              className="kbd app-search__hint"
+              title="Jump to a crane"
+              onClick={() => setPalette(true)}
+            >
+              {modKey('K', mac)}
+            </button>
           </label>
         }
       />
@@ -224,6 +273,17 @@ export function App() {
         </main>
       </div>
       <DropZone onDrop={dropped} />
+      {palette ? (
+        <CommandPalette
+          cranes={cranes}
+          onClose={() => setPalette(false)}
+          onChoose={(crane) => {
+            setPalette(false);
+            open(crane);
+          }}
+        />
+      ) : null}
+      {shortcuts ? <ShortcutsDialog mac={mac} onClose={() => setShortcuts(false)} /> : null}
       {meta ? (
         <MetadataDialog
           key={meta.key}

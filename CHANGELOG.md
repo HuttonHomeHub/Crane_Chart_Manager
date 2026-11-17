@@ -42,6 +42,10 @@ that section as the GitHub Release notes.
   exists") when only one of its extra files had failed; it now sends just what is missing. And
   "All four fields are required", "Choose a PDF first" and bulk-import problems now show in
   their dialog, where 1.x's toasts were hidden behind it.
+- **Rebuild: the command palette and shortcuts.** Ctrl/⌘+K (or the hint in the search box)
+  jumps to a crane by any word of its details or file labels, or lists everything at least a
+  capacity (`>=150`, `≥150`, `150t+`), smallest first. Ctrl/⌘+U uploads, and `?` or the
+  keyboard button lists every shortcut, now including find (Ctrl/⌘+F or `/`).
 
 ## v1.9.0 — shared container standard: unprefixed settings, all state in /config
 
