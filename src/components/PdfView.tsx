@@ -277,7 +277,7 @@ export function PdfView({ file, find, onFind, onNotice }: PdfViewProps) {
   const onPage = rendered && rendered.page === page ? rendered : null;
 
   return (
-    <>
+    <div className="pdf-area">
       <div
         id="find-bar"
         className="find-bar"
@@ -410,11 +410,11 @@ export function PdfView({ file, find, onFind, onNotice }: PdfViewProps) {
         >
           <ChevronRight size={18} aria-hidden />
         </button>
-        <span className="toolbar__divider" />
+        <span className="toolbar__divider toolbar__divider--fit" />
         <button
           type="button"
           id="zoom-out"
-          className="tool"
+          className="tool toolbar__step"
           aria-label="Zoom out"
           title="Zoom out (−)"
           onClick={() => zoomBy(-1)}
@@ -437,7 +437,7 @@ export function PdfView({ file, find, onFind, onNotice }: PdfViewProps) {
         <button
           type="button"
           id="zoom-in"
-          className="tool"
+          className="tool toolbar__step"
           aria-label="Zoom in"
           title="Zoom in (+)"
           onClick={() => zoomBy(1)}
@@ -499,6 +499,6 @@ export function PdfView({ file, find, onFind, onNotice }: PdfViewProps) {
           {fullscreen ? <Minimize size={18} aria-hidden /> : <Maximize size={18} aria-hidden />}
         </button>
       </div>
-    </>
+    </div>
   );
 }

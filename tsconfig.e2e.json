@@ -1,0 +1,10 @@
+{
+  "extends": "./vendor/hhh-platform/packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    // Node for the tests themselves, the DOM for code they run in the page (evaluate).
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["e2e/**/*.ts", "playwright.config.ts", "shared/**/*.ts"],
+  "exclude": ["node_modules", "dist", "vendor"]
+}

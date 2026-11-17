@@ -10,3 +10,4 @@ static/
 templates/
 # The local dev stack (git-excluded).
 compose.yaml
+e2e-results/

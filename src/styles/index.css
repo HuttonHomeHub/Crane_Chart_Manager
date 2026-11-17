@@ -61,7 +61,8 @@ body {
 
 .sidebar {
   display: grid;
-  grid-template-columns: 148px 1fr;
+  grid-template-columns: 176px minmax(0, 1fr);
+  overflow: hidden;
   width: 430px;
   flex-shrink: 0;
   border-right: 1px solid var(--border-default);
@@ -83,6 +84,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
   padding: var(--space-3);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
@@ -92,7 +94,15 @@ body {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.sidebar__heading span {
+.sidebar__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__count {
+  flex-shrink: 0;
   min-width: 1.5rem;
   padding: 0 var(--space-2);
   border-radius: var(--radius-pill);
@@ -342,6 +352,7 @@ body {
 }
 
 .info-bar {
+  margin: 0;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-6);
@@ -358,6 +369,7 @@ body {
 }
 
 .info-bar dd {
+  margin: 0;
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--fg-primary);
@@ -365,6 +377,17 @@ body {
 
 .viewer {
   position: relative;
+  /* Its own stacking context: the toolbar and find bar stay under the drawer. */
+  z-index: 0;
+}
+
+/* The PDF well with its floating find bar and toolbar. */
+.pdf-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ---- File strip ---------------------------------------------------------- */
@@ -550,6 +573,7 @@ body {
   justify-content: center;
   align-items: center;
   gap: 2px;
+  width: max-content;
   max-width: calc(100% - var(--space-8));
   padding: var(--space-1);
   transform: translateX(-50%);
@@ -1016,12 +1040,16 @@ body {
   }
 
   .tool {
-    min-width: 40px;
+    min-width: 36px;
     height: 40px;
   }
 
+  .toolbar {
+    border-radius: var(--radius-lg);
+  }
+
   .sidebar {
-    grid-template-columns: 120px 1fr;
+    grid-template-columns: 128px minmax(0, 1fr);
   }
 
   .model-item__action {
@@ -1048,6 +1076,8 @@ body {
 }
 
 @media (max-width: 520px) {
+  /* Phones: the readout still cycles fit page, fit width and 100%. */
+  .toolbar__step,
   .toolbar__fit,
   .toolbar__fullscreen,
   .toolbar__divider--fit {
